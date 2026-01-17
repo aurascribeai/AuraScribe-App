@@ -1,0 +1,7 @@
+{
+  "name": "AuraScribe",
+  "description": "Multi-agent medical scribe for clinical notes, prescriptions, and MADO compliance. Built for PIPEDA and Law 25 standards.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

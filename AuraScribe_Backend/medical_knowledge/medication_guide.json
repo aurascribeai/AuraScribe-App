@@ -1,0 +1,4 @@
+{
+  "cough + fever": ["pneumonia", "bronchitis", "COVID"],
+  "cough + wheezing": ["asthma", "COPD", "allergies"]
+}

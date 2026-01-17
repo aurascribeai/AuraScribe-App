@@ -1,0 +1,14 @@
+{
+  "elderly": {
+    "special_considerations": ["Multiple medications", "Weaker immune system", "Chronic diseases", "Fall risk"],
+    "common_issues": ["High blood pressure", "Diabetes", "Arthritis", "Memory problems"]
+  },
+  "child": {
+    "special_considerations": ["Growing body", "Vaccination status", "School attendance", "Parent concerns"],
+    "common_issues": ["Ear infections", "Asthma", "Allergies", "Stomach bugs"]
+  },
+  "pregnant": {
+    "special_considerations": ["Baby safety", "Pregnancy-safe medications", "Regular monitoring", "Delivery planning"],
+    "common_issues": ["Morning sickness", "Back pain", "Swelling", "High blood pressure"]
+  }
+}

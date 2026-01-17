@@ -1,0 +1,26 @@
+{
+  "chest_pain": {
+    "cardiologist": {
+      "differentials": ["Angina", "Heart attack", "Heart inflammation", "Aortic tear"],
+      "workup": ["ECG", "Blood test for heart damage", "Heart ultrasound", "Specialist referral"],
+      "treatment": ["Aspirin", "Heart medications", "Hospital if needed", "Cardiology follow-up"]
+    },
+    "generalist": {
+      "differentials": ["Acid reflux", "Muscle pain", "Anxiety", "Lung infection"],
+      "workup": ["Basic blood work", "Chest X-ray", "Try acid medication"],
+      "treatment": ["Antacid trial", "Pain relievers", "Reassurance", "Follow-up in clinic"]
+    }
+  },
+  "cough": {
+    "pulmonologist": {
+      "differentials": ["Asthma", "COPD", "Pneumonia", "Lung cancer"],
+      "workup": ["Lung function test", "Chest X-ray", "CT scan", "Bronchoscopy"],
+      "treatment": ["Inhalers", "Oxygen therapy", "Pulmonary rehab", "Lung specialist follow-up"]
+    },
+    "generalist": {
+      "differentials": ["Common cold", "Bronchitis", "Allergies", "Post-nasal drip"],
+      "workup": ["Listen to lungs", "Consider chest X-ray if persists", "Basic exam"],
+      "treatment": ["Cough syrup", "Rest", "Hydration", "Return if worsens"]
+    }
+  }
+}

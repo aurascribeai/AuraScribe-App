@@ -1,0 +1,4 @@
+
+User-agent: *
+Allow: /
+Sitemap: https://www.aurascribe.health/sitemap.xml

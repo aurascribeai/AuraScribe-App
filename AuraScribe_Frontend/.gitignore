@@ -1,0 +1,11 @@
+﻿# Generated security and workspace ignores
+node_modules/
+dist/
+.env
+.env.local
+.env.*
+*.log
+.vscode/
+.idea/
+.DS_Store
+coverage/
