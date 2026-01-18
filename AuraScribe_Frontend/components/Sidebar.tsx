@@ -68,19 +68,22 @@ const Sidebar: React.FC<SidebarProps> = ({
         <Logo showText={false} className="w-10 h-10" />
       </div>
 
-      <nav className="flex-1 px-4 py-2 space-y-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
+      <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
         {menuItems.map((item) => (
           <button
             key={item.id}
             onClick={() => setRoute(item.id)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${currentRoute === item.id
-                ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 font-medium'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+            className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 relative ${currentRoute === item.id
+                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
               } ${!isOpen && 'justify-center'}`}
             title={!isOpen ? item.label : ''}
           >
-            <span className="shrink-0">{item.icon}</span>
-            {isOpen && <span className="text-sm truncate">{item.label}</span>}
+            {currentRoute === item.id && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" />
+            )}
+            <span className={`shrink-0 transition-transform duration-200 ${currentRoute !== item.id && 'group-hover:scale-110'}`}>{item.icon}</span>
+            {isOpen && <span className="text-sm font-medium truncate">{item.label}</span>}
           </button>
         ))}
       </nav>

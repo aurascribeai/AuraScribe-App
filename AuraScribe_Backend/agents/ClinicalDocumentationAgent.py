@@ -132,11 +132,20 @@ class ClinicalDocumentationAgentWrapper:
         # Parse payload
         if isinstance(payload, dict):
             transcript_text = payload.get("transcript", "")
-            persona_data = payload.get("persona", {})
+            persona_key = payload.get("persona", "generalist")
+            persona_data = payload.get("persona_summary", {})
+            # Set persona if key provided
+            if persona_key in PERSONAS:
+                self.persona = type('Persona', (), {
+                    'persona_key': persona_key,
+                    'persona_data': PERSONAS[persona_key],
+                    'specialty_terms': {'diagnostic_focus': PERSONAS[persona_key].get('focus', '').split()}
+                })()
         else:
             transcript_text = payload
             persona_data = {}
-        
+            persona_key = "generalist"
+
         if not transcript_text or len(transcript_text.strip()) < 20:
             return {
                 "soap_note": {
@@ -173,6 +182,14 @@ class ClinicalDocumentationAgentWrapper:
         # Generate patient explanation
         patient_explanation = self._generate_patient_explanation(symptoms, transcript_text)
         
+        # Calculate confidence based on symptoms and systems detected
+        if len(symptoms) >= 3 and len(systems_involved) >= 2:
+            confidence = "high"
+        elif len(symptoms) >= 1:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
         return {
             "soap_note": {
                 "subjective": subjective,
@@ -183,14 +200,16 @@ class ClinicalDocumentationAgentWrapper:
             "patient_explanation": patient_explanation,
             "systems_involved": systems_involved,
             "symptoms_detected": [s["symptom"] for s in symptoms],
-            "confidence": "medium" if symptoms else "low",
+            "symptom_count": len(symptoms),
+            "confidence": confidence,
             "clinical_reasoning": self._generate_clinical_reasoning(symptoms, transcript_text),
             "formatted_content": self._format_soap_as_text({
                 "subjective": subjective,
                 "objective": objective,
                 "assessment": assessment,
                 "plan": plan
-            })
+            }),
+            "persona_used": persona_key if 'persona_key' in dir() else "generalist"
         }
     
     def _generate_subjective(self, transcript, symptoms):

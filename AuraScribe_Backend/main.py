@@ -31,18 +31,18 @@ import os
 import sys
 from datetime import datetime
 from dotenv import load_dotenv
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import json
 import redis
+
+# Load environment variables FIRST
+load_dotenv()
 
 # Add services folder to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 services_path = os.path.join(current_dir, 'services')
 if os.path.exists(services_path):
     sys.path.append(services_path)
-
-# Load environment variables
-load_dotenv()
 
 # Create Flask app
 app = Flask(__name__)
@@ -63,38 +63,82 @@ except redis.ConnectionError as e:
     logging.warning(f"Redis connection failed: {e}. Falling back to in-memory storage (NOT RECOMMENDED for production)")
     redis_client = None
 
+# CORS Configuration
+def _normalize_origins(origins: List[str]) -> List[str]:
+    """Deduplicate CORS origin lists while keeping order."""
+    seen = []
+    for origin in origins:
+        if not origin:
+            continue
+        if origin not in seen:
+            seen.append(origin)
+    return seen
 
-# =====================
-# Deployment Domain Mapping
-#   Backend:   https://api.aurascribe.ca
-#   Frontend:  https://app.aurascribe.ca
-#   Landing:   https://aurascribe.ca
-# =====================
 # CORS: Allow requests from frontend only
-allowed_origins_env = os.getenv('ALLOWED_ORIGINS', 'https://app.aurascribe.ca,http://localhost:5173')
-ALLOWED_ORIGINS = [origin.strip() for origin in allowed_origins_env.split(',') if origin.strip()]
-logging.info(f"ALLOWED_ORIGINS loaded: {ALLOWED_ORIGINS}")
 environment = os.getenv('ENVIRONMENT', 'production')
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', 'https://app.aurascribe.ca,http://localhost:5173')
+ALLOWED_ORIGINS = _normalize_origins([origin.strip() for origin in allowed_origins_env.split(',')])
+logging.info(f"ALLOWED_ORIGINS loaded: {ALLOWED_ORIGINS}")
 
 # Determine the origins to use based on environment
 if environment == 'production':
-    cors_origins = ["https://app.aurascribe.ca"]
+    # In production, let Nginx handle CORS to avoid duplicate headers
+    cors_origins = []
+    logging.info("Production mode: CORS handled by Nginx, Flask CORS disabled")
 else:
+    # In development, use Flask CORS
     cors_origins = ALLOWED_ORIGINS
+    logging.info(f"Development mode: Flask CORS enabled for: {cors_origins}")
 
-# Configure Flask-CORS with supports_credentials for auth headers
-# Using list format to prevent duplicate header issues
-CORS(app, resources={r"/api/*": {
-    "origins": cors_origins,
-    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization", "X-API-KEY"],
-    "supports_credentials": True
-}})
+# Configure Flask-CORS only if not in production
+if cors_origins:
+    CORS(app, resources={r"/api/*": {
+        "origins": cors_origins,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-API-KEY"],
+        "supports_credentials": True
+    }})
 
-# Initialize SocketIO with the Flask app and CORS settings
-# This must be done AFTER app creation but BEFORE routes are defined
-socketio.init_app(app, cors_allowed_origins=cors_origins, async_mode='threading')
-logging.info(f"SocketIO initialized with CORS origins: {cors_origins}")
+# SocketIO CORS configuration
+try:
+    from services.ws_dictation import socketio
+    # Initialize SocketIO with appropriate CORS settings
+    socketio_cors_origins = cors_origins if cors_origins else ["https://app.aurascribe.ca"]
+    socketio.init_app(app, cors_allowed_origins=socketio_cors_origins, async_mode='threading')
+    logging.info(f"SocketIO initialized with CORS origins: {socketio_cors_origins}")
+except ImportError as e:
+    logging.error(f"Failed to import ws_dictation: {e}")
+    socketio = None
+
+# Import other services
+try:
+    from services.clinical_coding_agent import ClinicalCodingAgent
+    coding_agent = ClinicalCodingAgent()
+except ImportError as e:
+    logging.warning(f"Clinical coding agent not available: {e}")
+    coding_agent = None
+
+try:
+    from services.user_management import register_user, login_user, create_clinic, log_audit, USERS, CLINICS, AUDIT_LOG
+except ImportError as e:
+    logging.warning(f"User management not available: {e}")
+
+try:
+    from services.pdf.pdf_service import save_pdf, get_pdf_path
+except ImportError as e:
+    logging.warning(f"PDF service not available: {e}")
+
+try:
+    from services.integration_loader import load_clinic_config, get_efax_adapter, get_emr_adapter
+except ImportError as e:
+    logging.warning(f"Integration loader not available: {e}")
+
+try:
+    from agents.medical_persona_system import MedicalPersona
+    current_persona = MedicalPersona("generalist")
+except ImportError as e:
+    logging.warning(f"Medical persona system not available: {e}")
+    current_persona = None
 
 # Rate limiting
 limiter = Limiter(
@@ -432,8 +476,10 @@ def transcribe():
         generated_forms = None
         if result.get('success') and result.get('transcript'):
             try:
-                logging.info("Running orchestrator to generate forms...")
-                orchestration_result = orchestrate_transcript(result['transcript'])
+                # Get persona from request if available
+                persona_key = request.form.get('persona', 'generalist')
+                logging.info(f"Running orchestrator to generate forms (persona: {persona_key})...")
+                orchestration_result = orchestrate_transcript(result['transcript'], persona_key=persona_key)
 
                 # Extract forms from agent results
                 agent_results = orchestration_result.get('agent_results', {})
@@ -517,22 +563,30 @@ def route():
 @limiter.limit("20/minute")
 @api_key_required
 def orchestrate():
-    """Orchestrate medical transcript processing"""
+    """Orchestrate medical transcript processing with persona support"""
     try:
         data = request.json
         if not data or 'transcript' not in data:
             return jsonify({'error': 'Missing transcript'}), 400
         transcript = data['transcript']
-        result = orchestrate_transcript(transcript)
+        persona_key = data.get('persona', 'generalist')
+        use_parallel = data.get('parallel', True)
+
+        result = orchestrate_transcript(transcript, persona_key=persona_key, use_parallel=use_parallel)
+
         return jsonify({
             'success': True,
             'transcript_length': len(transcript),
+            'persona_used': persona_key,
             'orchestration': result,
+            'execution_stats': result.get('execution_stats', {}),
+            'confidence': result.get('confidence', 'unknown'),
             'workflow': [
                 '1. Receive transcript',
                 '2. Router analyzes and determines needed agents',
                 '3. Orchestrator coordinates parallel agent execution',
-                '4. Results aggregated and returned'
+                '4. Results aggregated with confidence scoring',
+                '5. Summary generated from all agent outputs'
             ],
             'note': 'Orchestration complete',
             'timestamp': datetime.now().isoformat()
@@ -825,44 +879,33 @@ def get_job_status(job_id):
 @app.route('/api/ask-aura/chat', methods=['POST'])
 @api_key_required
 def ask_aura_chat():
-    """Chat with Aura AI assistant for clinical reasoning"""
+    """Chat with Aura AI assistant for clinical reasoning - Enhanced with persona support"""
     try:
         data = request.get_json() or {}
         user_message = data.get('message', '')
         context = data.get('context', '')
         session_transcript = data.get('session_transcript', '')
         language = data.get('language', 'fr')
+        persona_key = data.get('persona', 'generalist')
 
         if not user_message:
             return jsonify({'error': 'No message provided'}), 400
-
-        # Build prompt with context for logging and fallback
-        full_context = f"""
-Tu es Aura, un assistant médical spécialisé en raisonnement clinique et médecine basée sur les preuves (EBM).
-Langue: {'Français' if language == 'fr' else 'English'}
-
-Contexte du dossier patient:
-{context}
-
-Transcription de la consultation:
-{session_transcript[:2000] if session_transcript else 'Aucune transcription disponible'}
-
-Question de l'utilisateur: {user_message}
-
-Réponds de manière concise et professionnelle en citant les sources.
-"""
 
         agent_payload = {
             "transcript": session_transcript,
             "context": context,
             "question": user_message,
-            "language": language
+            "message": user_message,
+            "language": language,
+            "persona": persona_key
         }
 
         response_text = ""
         summary = ""
         suggestions = []
         sources = []
+        clinical_reasoning = []
+        confidence = "low"
         fallback_used = False
         agent_available = bool(ask_aura_agent)
 
@@ -872,13 +915,21 @@ Réponds de manière concise et professionnelle en citant les sources.
             summary = agent_result.get('summary', '')
             suggestions = agent_result.get('suggestions', [])
             sources = agent_result.get('sources', [])
+            clinical_reasoning = agent_result.get('clinical_reasoning', [])
+            confidence = agent_result.get('confidence', 'medium')
+            persona_info = agent_result.get('persona', {})
         else:
             logging.warning("AskAura agent unavailable, using orchestrator fallback")
             fallback_used = True
-            # For now, return a simple response
-            response_text = f"Based on your query about '{user_message}', I recommend consulting current clinical guidelines. Consider patient-specific factors from the context provided."
-            sources = ["Clinical practice guidelines", "Evidence-based medicine databases"]
-            suggestions = ["Review patient history", "Check medication interactions", "Consider differential diagnosis"]
+            if language == 'fr':
+                response_text = f"Basé sur votre question concernant '{user_message}', je recommande de consulter les guides de pratique clinique actuels. Considérez les facteurs spécifiques au patient dans le contexte fourni."
+                sources = ["Guides de pratique clinique", "Bases de données de médecine factuelle"]
+                suggestions = ["Revoir l'historique du patient", "Vérifier les interactions médicamenteuses", "Considérer le diagnostic différentiel"]
+            else:
+                response_text = f"Based on your query about '{user_message}', I recommend consulting current clinical guidelines. Consider patient-specific factors from the context provided."
+                sources = ["Clinical practice guidelines", "Evidence-based medicine databases"]
+                suggestions = ["Review patient history", "Check medication interactions", "Consider differential diagnosis"]
+            persona_info = {"key": persona_key, "name": "General Practitioner"}
 
         return jsonify({
             'success': True,
@@ -888,6 +939,10 @@ Réponds de manière concise et professionnelle en citant les sources.
             'summary': summary,
             'suggestions': suggestions,
             'sources': sources,
+            'clinical_reasoning': clinical_reasoning,
+            'confidence': confidence,
+            'persona': persona_info if not fallback_used else {"key": persona_key},
+            'language': language,
             'timestamp': datetime.now().isoformat()
         })
 
@@ -1044,6 +1099,623 @@ def demo():
         ],
         'timestamp': datetime.now().isoformat()
     })
+
+
+# ========== AURALINK SECURE FILE SHARING ==========
+# Redis-based transfer storage with configurable TTL for Loi 25 compliance
+
+AURALINK_TTL_MAP = {
+    '15m': 900,
+    '1h': 3600,
+    '24h': 86400,
+    '7j': 604800
+}
+
+def _get_transfer_key(transfer_id: str) -> str:
+    """Generate Redis key for a transfer"""
+    return f"aurascribe:auralink:{transfer_id}"
+
+def _save_transfer(transfer: dict) -> bool:
+    """Save transfer to Redis or fallback storage"""
+    transfer_id = transfer['id']
+    expiry = transfer.get('expiry', '24h')
+    ttl = AURALINK_TTL_MAP.get(expiry, 86400)
+
+    if redis_client:
+        try:
+            key = _get_transfer_key(transfer_id)
+            redis_client.setex(key, ttl, json.dumps(transfer))
+            return True
+        except redis.RedisError as e:
+            logging.error(f"Redis error saving transfer: {e}")
+            return False
+    else:
+        # Fallback storage (in-memory)
+        if not hasattr(_save_transfer, 'fallback'):
+            _save_transfer.fallback = {}
+        _save_transfer.fallback[transfer_id] = transfer
+        return True
+
+def _get_transfer(transfer_id: str) -> Optional[dict]:
+    """Get transfer from Redis or fallback storage"""
+    if redis_client:
+        try:
+            key = _get_transfer_key(transfer_id)
+            data = redis_client.get(key)
+            if data:
+                return json.loads(data)
+            return None
+        except redis.RedisError as e:
+            logging.error(f"Redis error getting transfer: {e}")
+            return None
+    else:
+        if hasattr(_save_transfer, 'fallback'):
+            return _save_transfer.fallback.get(transfer_id)
+        return None
+
+def _list_transfers(limit: int = 50) -> list:
+    """List all active transfers"""
+    if redis_client:
+        try:
+            keys = redis_client.keys("aurascribe:auralink:*")
+            if isinstance(keys, list):
+                keys_list = keys
+            elif hasattr(keys, '__iter__') and not isinstance(keys, (str, bytes)):
+                keys_list = list(keys)
+            else:
+                keys_list = []
+            transfers = []
+            for key in keys_list[:limit]:
+                data = redis_client.get(key)
+                if data:
+                    transfers.append(json.loads(data))
+            transfers.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            return transfers
+        except redis.RedisError as e:
+            logging.error(f"Redis error listing transfers: {e}")
+            return []
+    else:
+        if hasattr(_save_transfer, 'fallback'):
+            return list(_save_transfer.fallback.values())[:limit]
+        return []
+
+def _delete_transfer(transfer_id: str) -> bool:
+    """Delete a transfer"""
+    if redis_client:
+        try:
+            key = _get_transfer_key(transfer_id)
+            redis_client.delete(key)
+            return True
+        except redis.RedisError as e:
+            logging.error(f"Redis error deleting transfer: {e}")
+            return False
+    else:
+        if hasattr(_save_transfer, 'fallback'):
+            _save_transfer.fallback.pop(transfer_id, None)
+        return True
+
+
+@app.route('/api/auralink/transfers', methods=['POST'])
+@api_key_required
+def create_auralink_transfer():
+    """Create a new AuraLink secure file transfer"""
+    try:
+        data = request.get_json() or {}
+
+        # Validate required fields
+        file_url = data.get('file_url')
+        file_name = data.get('file_name')
+        recipient_email = data.get('recipient_email')
+
+        if not file_url or not recipient_email:
+            return jsonify({'error': 'Missing required fields: file_url and recipient_email'}), 400
+
+        # Generate secure token
+        import secrets
+        transfer_id = f"al-{datetime.now().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
+        access_token = secrets.token_urlsafe(32)
+
+        # Build transfer object
+        transfer = {
+            'id': transfer_id,
+            'file': {
+                'name': file_name or 'document',
+                'url': file_url,
+                'type': data.get('file_type', 'pdf'),
+                'size': data.get('file_size', 'unknown')
+            },
+            'recipient_email': recipient_email,
+            'permissions': {
+                'read': data.get('permissions', {}).get('read', True),
+                'download': data.get('permissions', {}).get('download', False),
+                'edit': data.get('permissions', {}).get('edit', False)
+            },
+            'security': {
+                'method': data.get('security_method', 'token'),
+                'token': access_token,
+                'password': data.get('password'),
+                'anti_capture': data.get('anti_capture', True)
+            },
+            'expiry': data.get('expiry', '24h'),
+            'status': 'active',
+            'access_count': 0,
+            'created_at': datetime.now().isoformat(),
+            'created_by': data.get('created_by', 'unknown')
+        }
+
+        # Save transfer
+        if not _save_transfer(transfer):
+            return jsonify({'error': 'Failed to save transfer'}), 500
+
+        # Generate secure access link
+        base_url = request.host_url.rstrip('/')
+        access_link = f"{base_url}/api/auralink/access/{transfer_id}?token={access_token}"
+
+        logging.info(f"AuraLink transfer created: {transfer_id} for {recipient_email}")
+
+        # Send email notification (if email service configured)
+        email_sent = False
+        try:
+            # Check if we have email configuration
+            smtp_host = os.getenv('SMTP_HOST')
+            if smtp_host:
+                import smtplib
+                from email.mime.text import MIMEText
+                from email.mime.multipart import MIMEMultipart
+
+                smtp_port = int(os.getenv('SMTP_PORT', 587))
+                smtp_user = os.getenv('SMTP_USER')
+                smtp_pass = os.getenv('SMTP_PASS')
+                from_email = os.getenv('SMTP_FROM', 'noreply@aurascribe.ca')
+
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = f"AuraScribe: Document sécurisé partagé avec vous"
+                msg['From'] = from_email
+                msg['To'] = recipient_email
+
+                html_body = f"""
+                <html>
+                <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: #1e293b; padding: 20px; text-align: center;">
+                        <h1 style="color: #00ffa3; margin: 0;">AuraScribe</h1>
+                        <p style="color: #94a3b8; margin: 5px 0 0 0;">Partage sécurisé de documents cliniques</p>
+                    </div>
+                    <div style="padding: 30px; background: #f8fafc;">
+                        <p style="color: #334155;">Bonjour,</p>
+                        <p style="color: #334155;">Un document clinique sécurisé a été partagé avec vous via AuraLink.</p>
+                        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                            <p style="color: #64748b; font-size: 12px; margin: 0 0 5px 0;">DOCUMENT</p>
+                            <p style="color: #1e293b; font-weight: bold; margin: 0;">{file_name or 'Document clinique'}</p>
+                        </div>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="{access_link}" style="background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: bold;">Accéder au document</a>
+                        </div>
+                        <p style="color: #64748b; font-size: 12px;">Ce lien expire dans {transfer['expiry']}.</p>
+                        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+                        <p style="color: #94a3b8; font-size: 11px; text-align: center;">
+                            Ce document est protégé conformément à la Loi 25 et PIPEDA.<br>
+                            Ne partagez pas ce lien avec des tiers non autorisés.
+                        </p>
+                    </div>
+                </body>
+                </html>
+                """
+
+                msg.attach(MIMEText(html_body, 'html'))
+
+                with smtplib.SMTP(smtp_host, smtp_port) as server:
+                    server.starttls()
+                    if smtp_user and smtp_pass:
+                        server.login(smtp_user, smtp_pass)
+                    server.send_message(msg)
+
+                email_sent = True
+                logging.info(f"AuraLink email sent to {recipient_email}")
+        except Exception as email_err:
+            logging.warning(f"Failed to send AuraLink email: {email_err}")
+
+        return jsonify({
+            'success': True,
+            'transfer_id': transfer_id,
+            'access_token': access_token,
+            'access_link': access_link,
+            'email_sent': email_sent,
+            'expiry': transfer['expiry'],
+            'created_at': transfer['created_at']
+        }), 201
+
+    except Exception as e:
+        logging.error(f"Error creating AuraLink transfer: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auralink/transfers', methods=['GET'])
+@api_key_required
+def list_auralink_transfers():
+    """List all active AuraLink transfers"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        transfers = _list_transfers(limit)
+
+        # Remove sensitive data from response
+        safe_transfers = []
+        for t in transfers:
+            safe_t = {
+                'id': t['id'],
+                'file': t['file'],
+                'recipient_email': t['recipient_email'],
+                'permissions': t['permissions'],
+                'expiry': t['expiry'],
+                'status': t['status'],
+                'access_count': t.get('access_count', 0),
+                'created_at': t['created_at']
+            }
+            safe_transfers.append(safe_t)
+
+        return jsonify({
+            'success': True,
+            'transfers': safe_transfers,
+            'count': len(safe_transfers)
+        })
+    except Exception as e:
+        logging.error(f"Error listing AuraLink transfers: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auralink/transfers/<transfer_id>', methods=['DELETE'])
+@api_key_required
+def delete_auralink_transfer(transfer_id):
+    """Delete/revoke an AuraLink transfer"""
+    try:
+        transfer = _get_transfer(transfer_id)
+        if not transfer:
+            return jsonify({'error': 'Transfer not found'}), 404
+
+        _delete_transfer(transfer_id)
+        logging.info(f"AuraLink transfer deleted: {transfer_id}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Transfer revoked successfully'
+        })
+    except Exception as e:
+        logging.error(f"Error deleting AuraLink transfer: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auralink/access/<transfer_id>', methods=['GET'])
+def access_auralink_file(transfer_id):
+    """Public endpoint to access a shared file (requires token or password)"""
+    try:
+        transfer = _get_transfer(transfer_id)
+        if not transfer:
+            return jsonify({'error': 'Transfer not found or expired'}), 404
+
+        # Validate access
+        token = request.args.get('token')
+        password = request.args.get('password')
+
+        security = transfer.get('security', {})
+
+        if security.get('method') == 'token':
+            if token != security.get('token'):
+                return jsonify({'error': 'Invalid access token'}), 403
+        elif security.get('method') == 'password':
+            if password != security.get('password'):
+                return jsonify({'error': 'Invalid password'}), 403
+
+        # Update access count
+        transfer['access_count'] = transfer.get('access_count', 0) + 1
+        transfer['last_accessed'] = datetime.now().isoformat()
+        _save_transfer(transfer)
+
+        # Return file info (or redirect to file)
+        file_info = transfer.get('file', {})
+        permissions = transfer.get('permissions', {})
+
+        return jsonify({
+            'success': True,
+            'file': {
+                'name': file_info.get('name'),
+                'url': file_info.get('url') if permissions.get('download') else None,
+                'type': file_info.get('type')
+            },
+            'permissions': permissions,
+            'anti_capture': security.get('anti_capture', True),
+            'access_count': transfer['access_count']
+        })
+
+    except Exception as e:
+        logging.error(f"Error accessing AuraLink file: {e}")
+        return jsonify({'error': 'Access failed'}), 500
+
+
+# ========== EMR INTEGRATION ENDPOINTS ==========
+
+@app.route('/api/emr/status', methods=['GET'])
+@api_key_required
+def emr_status():
+    """Get EMR connection status and configuration"""
+    try:
+        from services.emr_adapter import get_emr_status
+        status = get_emr_status()
+        return jsonify({
+            'success': True,
+            **status,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error getting EMR status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sessions/<session_id>/emr', methods=['POST'])
+@api_key_required
+def push_session_to_emr(session_id):
+    """Push a session's clinical documentation to EMR"""
+    try:
+        from services.emr_adapter import push_to_emr
+
+        data = request.get_json() or {}
+        patient_id = data.get('patient_id')
+
+        if not patient_id:
+            return jsonify({'error': 'patient_id is required'}), 400
+
+        # Get the session
+        session = _get_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        # Build document content from session
+        document_content = {
+            'session_id': session_id,
+            'patient_name': session.get('patient_name', ''),
+            'transcript': session.get('transcript', ''),
+            'soap_note': session.get('forms', {}).get('soap_note', {}),
+            'created_at': session.get('created_at', ''),
+            'status': session.get('status', '')
+        }
+
+        # Push to EMR
+        result = push_to_emr({
+            'patient_id': patient_id,
+            'document_type': 'soap_note',
+            'content': document_content,
+            'session_id': session_id,
+            'metadata': {
+                'source': 'aurascribe',
+                'language': session.get('language', 'fr')
+            }
+        })
+
+        if result.get('success'):
+            # Update session with EMR reference
+            session['emr_pushed'] = True
+            session['emr_document_id'] = result.get('emr_document_id')
+            session['emr_pushed_at'] = datetime.now().isoformat()
+            _save_session(session)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logging.error(f"Error pushing to EMR: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/emr/patient/<patient_id>', methods=['GET'])
+@api_key_required
+def get_patient_from_emr(patient_id):
+    """Pull patient data from EMR"""
+    try:
+        from services.emr_adapter import pull_from_emr
+        result = pull_from_emr(patient_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error pulling from EMR: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ========== EFAX INTEGRATION ENDPOINTS ==========
+
+@app.route('/api/efax/status', methods=['GET'])
+@api_key_required
+def efax_status():
+    """Get eFax service status and configuration"""
+    try:
+        from services.efax_service import get_efax_status
+        status = get_efax_status()
+        return jsonify({
+            'success': True,
+            **status,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error getting eFax status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sessions/<session_id>/efax', methods=['POST'])
+@api_key_required
+def send_session_via_efax(session_id):
+    """Send a session's PDF via eFax"""
+    try:
+        from services.efax_service import send_fax
+
+        data = request.get_json() or {}
+        fax_number = data.get('fax_number')
+
+        if not fax_number:
+            return jsonify({'error': 'fax_number is required'}), 400
+
+        # Get the session
+        session = _get_session(session_id)
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        # Check if PDF exists for this session
+        pdf_path = get_pdf_path(f"session_{session_id}.pdf")
+        if not pdf_path:
+            # Generate PDF if it doesn't exist
+            pdf_path = f"uploads/session_{session_id}.pdf"
+            # In production: Generate PDF from session data
+            return jsonify({
+                'error': 'PDF not found for this session',
+                'suggestion': 'Generate PDF first using /api/sessions/{id}/pdf'
+            }), 404
+
+        # Send fax
+        result = send_fax(
+            pdf_path=pdf_path,
+            recipient_number=fax_number,
+            options={
+                'recipient_name': data.get('recipient_name', 'Destinataire'),
+                'subject': data.get('subject', f"Document médical - {session.get('patient_name', 'Patient')}"),
+                'notes': data.get('notes', ''),
+                'cover_page': data.get('cover_page', True),
+                'language': session.get('language', 'fr'),
+                'priority': data.get('priority', 'normal')
+            }
+        )
+
+        if result.get('success'):
+            # Update session with fax info
+            if 'fax_history' not in session:
+                session['fax_history'] = []
+            session['fax_history'].append({
+                'fax_id': result.get('fax_id'),
+                'recipient': fax_number,
+                'sent_at': datetime.now().isoformat(),
+                'status': result.get('status')
+            })
+            _save_session(session)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logging.error(f"Error sending eFax: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/efax/<fax_id>/status', methods=['GET'])
+@api_key_required
+def get_efax_delivery_status(fax_id):
+    """Get the delivery status of a sent fax"""
+    try:
+        from services.efax_service import get_fax_status
+        result = get_fax_status(fax_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Error getting fax status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ========== AUTHENTICATION ENDPOINTS ==========
+
+@app.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    """Register a new user"""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username') or data.get('email')
+        password = data.get('password')
+        role = data.get('role', 'Physician')
+        clinic_id = data.get('clinic_id', 'default')
+
+        if not username or not password:
+            return jsonify({'error': 'Username and password are required'}), 400
+
+        # Check if user exists
+        for user in USERS.values():
+            if user.username == username:
+                return jsonify({'error': 'User already exists'}), 409
+
+        # Create clinic if needed
+        if clinic_id not in CLINICS:
+            clinic_name = data.get('clinic_name', 'Default Clinic')
+            clinic = create_clinic(clinic_name)
+            clinic_id = clinic.id
+
+        # Register user
+        user = register_user(username, password, role, clinic_id)
+
+        # Log audit
+        log_audit(user.id, 'REGISTER', f'New user registered: {username}')
+
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'clinic_id': user.clinic_id
+            },
+            'message': 'Registration successful'
+        })
+
+    except Exception as e:
+        logging.error(f"Error in registration: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Authenticate a user"""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username') or data.get('email')
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'error': 'Username and password are required'}), 400
+
+        # Attempt login
+        user = login_user(username, password)
+
+        if not user:
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+        # Log audit
+        log_audit(user.id, 'LOGIN', f'User logged in: {username}')
+
+        # Generate session token (in production, use JWT)
+        import secrets
+        session_token = secrets.token_urlsafe(32)
+
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'clinic_id': user.clinic_id
+            },
+            'token': session_token,
+            'message': 'Login successful'
+        })
+
+    except Exception as e:
+        logging.error(f"Error in login: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/audit', methods=['GET'])
+@api_key_required
+def get_audit_log():
+    """Get audit log (admin only)"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        logs = [entry.to_dict() for entry in AUDIT_LOG[-limit:]]
+        logs.reverse()  # Most recent first
+        return jsonify({
+            'success': True,
+            'logs': logs,
+            'count': len(logs)
+        })
+    except Exception as e:
+        logging.error(f"Error getting audit log: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     logging.info("=" * 60)

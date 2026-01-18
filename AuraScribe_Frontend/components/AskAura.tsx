@@ -37,7 +37,7 @@ const AskAura: React.FC<AskAuraProps> = ({ sessions, lang }) => {
   const [studyCase, setStudyCase] = useState<string>('');
   // TODO: Replace EvidenceBlog type with actual API response type
   const [evidenceBlogs, setEvidenceBlogs] = useState<any[]>([]);
-  const [selectedBlog, setSelectedBlog] = useState<any | null>(null);
+  const [selectedBlog, setSelectedBlog] = useState<any>(null);
   const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'aura', content: string }[]>([]);
   const [chatSources, setChatSources] = useState<string[]>([]);
   const [chatMeta, setChatMeta] = useState<string>('');

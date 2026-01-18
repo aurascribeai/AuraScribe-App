@@ -351,6 +351,16 @@ export const translations = {
       connect: 'Connexion',
       rights: 'Tous droits réservés.',
       status: 'Système Opérationnel'
+    },
+    common: {
+      skipToContent: 'Aller au contenu principal',
+      loading: 'Chargement...',
+      pageTitle: 'AuraScribe | Scribe médical IA pour le Canada',
+      articleNotFound: 'Article non trouvé | AuraScribe',
+      pageNotFound: 'Page non trouvée | AuraScribe',
+      notFoundTitle: 'Page non trouvée',
+      notFoundDescription: 'La page que vous recherchez n\'existe pas ou a été déplacée.',
+      returnHome: 'Retour à l\'accueil'
     }
   },
   en: {
@@ -704,6 +714,16 @@ export const translations = {
       connect: 'Connect',
       rights: 'All rights reserved.',
       status: 'System Operational'
+    },
+    common: {
+      skipToContent: 'Skip to main content',
+      loading: 'Loading...',
+      pageTitle: 'AuraScribe | AI Medical Scribe for Canada',
+      articleNotFound: 'Article Not Found | AuraScribe',
+      pageNotFound: 'Page Not Found | AuraScribe',
+      notFoundTitle: 'Page Not Found',
+      notFoundDescription: 'The page you are looking for does not exist or has been moved.',
+      returnHome: 'Return Home'
     }
   }
 };

@@ -16,16 +16,18 @@ import Schedule from './components/Schedule';
 import Auth from './components/Auth';
 import SecurityShield from './components/SecurityShield';
 import NotificationTray from './components/NotificationTray';
-import { AppRoute, Language, Session, FormStatus, Task, ClinicalTemplate, RAMQBill, User, AuraNotification } from './types';
-import { TRANSLATIONS } from './constants';
+import { AppRoute, Session, FormStatus, Task, ClinicalTemplate, RAMQBill, User, AuraNotification } from './types';
+import { useLanguage } from './contexts/LanguageContext';
 import { Bell, Clock, CheckCircle, FileText } from 'lucide-react';
 
 const App: React.FC = () => {
+  // Use language context instead of local state
+  const { language, setLanguage, t } = useLanguage();
+
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPrivacyMode, setIsPrivacyMode] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentRoute, setCurrentRoute] = useState<AppRoute>(AppRoute.NEW_SESSION);
-  const [language, setLanguage] = useState<Language>('fr');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
@@ -73,10 +75,8 @@ const App: React.FC = () => {
         const expired = prev.filter(s => (now - s.createdAt) > expirationLimit);
         if (expired.length > 0) {
           addNotification({
-            title: language === 'fr' ? 'Purge Loi 25' : 'Law 25 Purge',
-            message: language === 'fr'
-              ? `${expired.length} sessions ont été supprimées définitivement pour conformité.`
-              : `${expired.length} sessions were permanently deleted for compliance.`,
+            title: t('law25_purge'),
+            message: `${expired.length} ${t('sessions_deleted_compliance')}`,
             type: 'warning'
           });
         }
@@ -85,7 +85,7 @@ const App: React.FC = () => {
     }, 60000);
 
     return () => clearInterval(purgeInterval);
-  }, [language, currentRoute]);
+  }, [language, currentRoute, t]);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -95,14 +95,14 @@ const App: React.FC = () => {
     }
   }, [isDarkMode]);
 
-  const t = (key: string) => TRANSLATIONS[key]?.[language] || key;
+  // t function is now provided by useLanguage() hook
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
     setIsAuthenticated(true);
     addNotification({
-      title: language === 'fr' ? 'Connexion réussie' : 'Login Successful',
-      message: language === 'fr' ? `Bienvenue, ${user.fullName}.` : `Welcome, ${user.fullName}.`,
+      title: t('login_successful'),
+      message: `${t('welcome')}, ${user.fullName}.`,
       type: 'success'
     });
   };
@@ -119,10 +119,8 @@ const App: React.FC = () => {
     setCurrentRoute(AppRoute.VIEW_SESSIONS);
 
     addNotification({
-      title: language === 'fr' ? 'Swarm Aura terminé' : 'Aura Swarm Complete',
-      message: language === 'fr'
-        ? `Documentation pour ${newSession.patientInfo.fullName} prête.`
-        : `Documentation for ${newSession.patientInfo.fullName} is ready.`,
+      title: t('aura_swarm_complete'),
+      message: `${t('documentation_for')} ${newSession.patientInfo.fullName} ${t('documentation_ready')}`,
       type: 'success',
       actionRoute: AppRoute.VIEW_SESSIONS,
       relatedId: newSession.id
@@ -130,10 +128,8 @@ const App: React.FC = () => {
 
     if (newSession.madoData) {
       addNotification({
-        title: language === 'fr' ? 'ALERTE MADO DÉTECTÉE' : 'MADO ALERT DETECTED',
-        message: language === 'fr'
-          ? `Une maladie à déclaration obligatoire (${newSession.madoData.diseaseDetected}) nécessite votre signature.`
-          : `A mandatory reportable disease (${newSession.madoData.diseaseDetected}) requires your signature.`,
+        title: t('mado_alert_detected'),
+        message: `${t('mado_requires_signature')} (${newSession.madoData.diseaseDetected})`,
         type: 'critical',
         actionRoute: AppRoute.VIEW_SESSIONS,
         relatedId: newSession.id
@@ -142,10 +138,8 @@ const App: React.FC = () => {
 
     if (aiTasks.length > 0) {
       addNotification({
-        title: language === 'fr' ? 'Nouvelles tâches IA' : 'New AI Tasks',
-        message: language === 'fr'
-          ? `${aiTasks.length} actions extraites de la session.`
-          : `${aiTasks.length} actions extracted from the session.`,
+        title: t('new_ai_tasks'),
+        message: `${aiTasks.length} ${t('actions_extracted')}`,
         type: 'info',
         actionRoute: AppRoute.TASKS
       });
@@ -153,9 +147,9 @@ const App: React.FC = () => {
   };
 
   const handleDeleteSession = (id: string) => {
-    if (window.confirm(language === 'fr' ? 'Êtes-vous sûr de vouloir supprimer cette session ?' : 'Are you sure you want to delete this session?')) {
+    if (window.confirm(t('confirm_delete_session'))) {
       setSessions(sessions.filter(s => s.id !== id));
-      setTasks(tasks.filter(t => t.relatedSessionId !== id));
+      setTasks(tasks.filter(task => task.relatedSessionId !== id));
       if (activeSession?.id === id) setActiveSession(null);
     }
   };
@@ -171,8 +165,8 @@ const App: React.FC = () => {
   const handleSendBill = (bill: RAMQBill) => {
     setBills([bill, ...bills]);
     addNotification({
-      title: language === 'fr' ? 'Facturation RAMQ' : 'RAMQ Billing',
-      message: language === 'fr' ? 'Transmission vers le portail effectuée.' : 'Transmission to the portal completed.',
+      title: t('ramq_billing'),
+      message: t('transmission_completed'),
       type: 'success'
     });
   };
@@ -180,7 +174,7 @@ const App: React.FC = () => {
   const getRemainingTime = (createdAt: number) => {
     const elapsed = Date.now() - createdAt;
     const remaining = 24 * 60 * 60 * 1000 - elapsed;
-    if (remaining <= 0) return 'Expiré';
+    if (remaining <= 0) return t('expired');
     const hours = Math.floor(remaining / (1000 * 60 * 60));
     const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
     return `${hours}h ${mins}m`;
@@ -244,8 +238,7 @@ const App: React.FC = () => {
     }
     const savedDark = localStorage.getItem('isDarkMode');
     if (savedDark) setIsDarkMode(savedDark === 'true');
-    const savedLang = localStorage.getItem('language');
-    if (savedLang) setLanguage(savedLang as Language);
+    // Language is now managed by LanguageContext with its own persistence
     const savedSidebar = localStorage.getItem('isSidebarOpen');
     if (savedSidebar) setIsSidebarOpen(savedSidebar === 'true');
     const savedBranding = localStorage.getItem('branding');
@@ -270,9 +263,7 @@ const App: React.FC = () => {
     localStorage.setItem('isDarkMode', isDarkMode ? 'true' : 'false');
   }, [isDarkMode]);
 
-  useEffect(() => {
-    localStorage.setItem('language', language);
-  }, [language]);
+  // Language persistence is now handled by LanguageContext
 
   useEffect(() => {
     localStorage.setItem('isSidebarOpen', isSidebarOpen ? 'true' : 'false');
@@ -331,7 +322,7 @@ const App: React.FC = () => {
               {/* Display only local sessions */}
               {sessions.length > 0 ? sessions.map(s => {
                 const formsCount = Object.keys(s.forms).length;
-                const validatedCount = (Object.values(s.forms) as FormStatus[]).filter(f => f.status === 'validated').length;
+                const validatedCount = Object.values(s.forms).filter((f) => f.status === 'validated').length;
 
                 return (
                   <div key={s.id} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col hover:border-blue-500 dark:hover:border-blue-500 transition-all group shadow-sm overflow-hidden">
@@ -366,7 +357,7 @@ const App: React.FC = () => {
                   </div>
                 );
               }) : (
-                <div className="col-span-full py-20 text-center text-slate-400">Aucune session enregistrée.</div>
+                <div className="col-span-full py-20 text-center text-slate-400">{t('no_sessions')}</div>
               )}
             </div>
           </div>
@@ -393,8 +384,8 @@ const App: React.FC = () => {
         return (
           <div className="flex flex-col items-center justify-center h-[60vh] text-slate-400">
             <Bell className="animate-pulse mb-4" />
-            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Module en attente</h3>
-            <p>Le module {t(currentRoute)} est en cours de développement.</p>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">{t('module_pending')}</h3>
+            <p>{t(currentRoute)} {t('module_in_development')}</p>
           </div>
         );
     }
@@ -421,24 +412,28 @@ const App: React.FC = () => {
       />
 
       {/* Persistent header for app name and greeting */}
-      <div className={`fixed top-0 z-40 flex items-center justify-between px-8 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 transition-all duration-300 ${isSidebarOpen ? 'left-64 w-[calc(100%-16rem)]' : 'left-20 w-[calc(100%-5rem)]'}`}>
-        <div className="flex items-center gap-3">
-          <Logo showText={true} className="w-10 h-10" />
-          <div>
-            <h1 className="text-xs font-bold text-blue-600 dark:text-blue-400 tracking-widest uppercase">AuraScribe</h1>
-            <p className="text-2xl font-bold heading-font text-slate-800 dark:text-white">
-              {language === 'fr' ? 'Bonjour' : 'Hello'}, {currentUser?.fullName.split(' ')[0] || 'Dr. Rousseau'}
-            </p>
+      <div className={`fixed top-0 z-40 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 transition-all duration-300 ${isSidebarOpen ? 'left-64 w-[calc(100%-16rem)]' : 'left-20 w-[calc(100%-5rem)]'}`}>
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Logo showText={true} className="w-10 h-10" />
+            <div>
+              <h1 className="text-xs font-bold text-blue-600 dark:text-blue-400 tracking-widest uppercase">AuraScribe</h1>
+              <p className="text-2xl font-bold heading-font text-slate-800 dark:text-white">
+                {t('hello')}, {currentUser?.fullName.split(' ')[0] || 'Dr. Rousseau'}
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main content - properly offset from sidebar and header */}
-      <main className={`flex-1 min-h-screen transition-all duration-300 p-4 sm:p-8 pt-32 ${isSidebarOpen ? 'ml-64' : 'ml-20'}`}>
-
-        {/* Main content below header */}
-        <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-          {renderContent()}
+      <main className={`flex-1 min-h-screen transition-all duration-300 pt-28 pb-8 ${isSidebarOpen ? 'ml-64' : 'ml-20'}`}>
+        {/* Centered content container with max-width */}
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Main content below header */}
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+            {renderContent()}
+          </div>
         </div>
 
         <SecurityShield

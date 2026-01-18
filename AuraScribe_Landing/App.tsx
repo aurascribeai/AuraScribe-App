@@ -59,7 +59,7 @@ const AppContent: React.FC = () => {
 
   // 4. Handle Title Updates & Scrolling
   useEffect(() => {
-    let title = "AuraScribe | AI Medical Scribe for Canada";
+    let title = t.common.pageTitle;
 
     if (route === '#pricing') title = `${t.nav.pricing} | AuraScribe`;
     if (route === '#features') title = `${t.nav.features} | AuraScribe`;
@@ -76,11 +76,11 @@ const AppContent: React.FC = () => {
       const slug = route.replace('#blog/', '');
       const post = t.blog.posts.find(p => p.slug === slug);
       if (post) title = `${post.title} | AuraScribe Insights`;
-      else title = "Article Not Found | AuraScribe";
+      else title = t.common.articleNotFound;
     }
 
     if (!isValidRoute) {
-      title = "Page Not Found | AuraScribe";
+      title = t.common.pageNotFound;
     }
 
     document.title = title;
@@ -129,13 +129,13 @@ const AppContent: React.FC = () => {
         className="sr-only focus:not-sr-only absolute top-2 left-2 z-[100] bg-neon-400 text-slate-950 px-4 py-2 rounded shadow font-bold transition-all"
         tabIndex={0}
       >
-        Skip to main content
+        {t.common.skipToContent}
       </a>
       <Background3D />
       <div className="relative z-10 flex flex-col min-h-screen">
         <Header />
         <main id="main-content" className="flex-grow">
-          <React.Suspense fallback={<div className="w-full flex justify-center items-center py-16 text-lg text-slate-400">Loading...</div>}>
+          <React.Suspense fallback={<div className="w-full flex justify-center items-center py-16 text-lg text-slate-400">{t.common.loading}</div>}>
             {isValidRoute ? (
               <>
                 {isLegalPage && <LegalDocs type={getLegalType() as any} />}

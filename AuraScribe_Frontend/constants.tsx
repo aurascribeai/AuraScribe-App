@@ -2,6 +2,33 @@ import { TranslationStrings } from './types';
 
 export const TRANSLATIONS: TranslationStrings = {
   app_name: { fr: 'AuraScribe', en: 'AuraScribe' },
+
+  // Greetings and common phrases
+  hello: { fr: 'Bonjour', en: 'Hello' },
+  welcome: { fr: 'Bienvenue', en: 'Welcome' },
+
+  // Notifications and alerts
+  law25_purge: { fr: 'Purge Loi 25', en: 'Law 25 Purge' },
+  sessions_deleted_compliance: { fr: 'sessions ont été supprimées définitivement pour conformité.', en: 'sessions were permanently deleted for compliance.' },
+  login_successful: { fr: 'Connexion réussie', en: 'Login Successful' },
+  aura_swarm_complete: { fr: 'Swarm Aura terminé', en: 'Aura Swarm Complete' },
+  documentation_ready: { fr: 'Documentation prête.', en: 'Documentation is ready.' },
+  documentation_for: { fr: 'Documentation pour', en: 'Documentation for' },
+  mado_alert_detected: { fr: 'ALERTE MADO DÉTECTÉE', en: 'MADO ALERT DETECTED' },
+  mado_requires_signature: { fr: 'Une maladie à déclaration obligatoire nécessite votre signature.', en: 'A mandatory reportable disease requires your signature.' },
+  new_ai_tasks: { fr: 'Nouvelles tâches IA', en: 'New AI Tasks' },
+  actions_extracted: { fr: 'actions extraites de la session.', en: 'actions extracted from the session.' },
+  ramq_billing: { fr: 'Facturation RAMQ', en: 'RAMQ Billing' },
+  transmission_completed: { fr: 'Transmission vers le portail effectuée.', en: 'Transmission to the portal completed.' },
+
+  // Confirmations
+  confirm_delete_session: { fr: 'Êtes-vous sûr de vouloir supprimer cette session ?', en: 'Are you sure you want to delete this session?' },
+
+  // Status messages
+  expired: { fr: 'Expiré', en: 'Expired' },
+  no_sessions: { fr: 'Aucune session enregistrée.', en: 'No sessions recorded.' },
+  module_pending: { fr: 'Module en attente', en: 'Module pending' },
+  module_in_development: { fr: 'est en cours de développement.', en: 'is under development.' },
   new_session: { fr: 'Nouvelle session', en: 'New Session' },
   view_sessions: { fr: 'Mes sessions', en: 'View Sessions' },
   ask_aura: { fr: 'Demander à Aura', en: 'Ask Aura' },

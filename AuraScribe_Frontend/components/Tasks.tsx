@@ -89,23 +89,23 @@ const Tasks: React.FC<TasksProps> = ({ lang, tasks, sessions, onToggleTask, onAd
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit shadow-sm">
-        <button 
+        <button
           onClick={() => setActiveFilter('all')}
-          className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'all' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          className={`px-6 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 ${activeFilter === 'all' ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
         >
-          Toutes ({tasks.length})
+          {lang === 'fr' ? 'Toutes' : 'All'} ({tasks.length})
         </button>
-        <button 
+        <button
           onClick={() => setActiveFilter('high')}
-          className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'high' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          className={`px-6 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 ${activeFilter === 'high' ? 'bg-gradient-to-r from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/25' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
         >
-          Haute Priorité ({tasks.filter(t => t.priority === 'high').length})
+          {lang === 'fr' ? 'Haute Priorité' : 'High Priority'} ({tasks.filter(t => t.priority === 'high').length})
         </button>
-        <button 
+        <button
           onClick={() => setActiveFilter('pending')}
-          className={`px-6 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'pending' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+          className={`px-6 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 ${activeFilter === 'pending' ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg shadow-amber-500/25' : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
         >
-          En attente ({tasks.filter(t => t.status === 'pending').length})
+          {lang === 'fr' ? 'En attente' : 'Pending'} ({tasks.filter(t => t.status === 'pending').length})
         </button>
       </div>
 
@@ -166,10 +166,12 @@ const Tasks: React.FC<TasksProps> = ({ lang, tasks, sessions, onToggleTask, onAd
           );
         }) : (
           <div className="py-24 text-center space-y-4">
-            <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-300">
-              <CheckSquare size={32} />
+            <div className="w-20 h-20 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-900/30 rounded-full flex items-center justify-center mx-auto text-emerald-500 shadow-lg shadow-emerald-500/10">
+              <CheckCircle2 size={36} />
             </div>
-            <p className="text-slate-500 text-sm">Toutes les tâches sont terminées. Bon travail, Dr. Rousseau.</p>
+            <p className="text-slate-500 text-sm font-medium">
+              {lang === 'fr' ? 'Toutes les tâches sont terminées. Bon travail !' : 'All tasks completed. Great job!'}
+            </p>
           </div>
         )}
       </div>

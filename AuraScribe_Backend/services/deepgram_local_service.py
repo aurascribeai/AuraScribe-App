@@ -1,6 +1,6 @@
 """
 deepgram_local_service.py
-Fixed for your specific Deepgram self-hosted instance
+Updated for correct model names available on your server
 """
 
 import os
@@ -21,11 +21,22 @@ class DeepgramLocalService:
         self.base_url = os.getenv('DEEPGRAM_SELF_HOSTED_URL', 'http://34.19.193.244:8080').rstrip('/')
         self.api_key = os.getenv('DEEPGRAM_API_KEY', '1e7b06318100c48315a6e638b18e86b54263a4a1')
         
-        # Model configurations - UPDATED WITH CORRECT MODEL NAMES
+        # Model configurations - UPDATED WITH CORRECT MODEL NAMES FOR YOUR SERVER
+        # Based on server logs showing: general-nova-3, 2-general-nova
         self.models = {
-            'en': os.getenv('DEEPGRAM_EN_MODEL', 'nova-3'),
-            'fr': os.getenv('DEEPGRAM_FR_MODEL', 'nova-3'),
-            'default': os.getenv('DEEPGRAM_DEFAULT_MODEL', 'nova-3')
+            'en': 'general-nova-3',
+            'fr': 'general-nova-3', 
+            'default': 'general-nova-3'
+        }
+        
+        # Model aliases - map common names to actual server model names
+        self.model_aliases = {
+            'nova-3': 'general-nova-3',
+            'nova-2': '2-general-nova', 
+            'general': 'general-nova-3',
+            '2-general': '2-general-nova',
+            'medical': 'general-nova-3',  # Fallback to general if medical not available
+            'nova-2-medical': 'general-nova-3'
         }
         
         # Default settings
@@ -86,21 +97,36 @@ class DeepgramLocalService:
             logger.error(f"Connection test error: {e}")
             return False, str(e)
     
-    def get_model_for_language(self, language: str) -> str:
-        """Get appropriate model for language"""
-        language = language.lower().split('-')[0]  # Convert 'en-US' to 'en'
+    def get_model_for_language(self, language: str, requested_model: str = None) -> str:
+        """Get appropriate model for language with fallback to available models"""
         
-        # Map to correct model names based on your instance
-        if language == 'fr':
-            return self.models.get('fr', 'general-nova-3')
-        elif language == 'en':
-            return self.models.get('en', 'general-nova-3')
+        # First try to map requested model to available model
+        if requested_model and requested_model in self.model_aliases:
+            return self.model_aliases[requested_model]
+        
+        # Otherwise use language-based mapping
+        language_code = language.lower().split('-')[0]  # Convert 'en-US' to 'en'
+        return self.models.get(language_code, self.models['default'])
+    
+    def get_safe_language_model_combo(self, language: str, model: str) -> Tuple[str, str]:
+        """Get a safe language/model combination that works on your server"""
+        
+        # Map model to available models
+        actual_model = self.get_model_for_language(language, model)
+        
+        # Simplify language codes to most supported versions
+        if language.startswith('fr'):
+            safe_language = 'fr-CA'
+        elif language.startswith('en'):
+            safe_language = 'en-US'
         else:
-            return self.models.get('default', 'general-nova-3')
+            safe_language = 'fr-CA'  # Default fallback
+        
+        return safe_language, actual_model
     
     def transcribe_audio_file(self, audio_file_path: str, **kwargs) -> Dict[str, Any]:
         """
-        Transcribe audio file using your Deepgram instance
+        Transcribe audio file using your Deepgram instance with fallback logic
         """
         try:
             # Read audio file
@@ -116,205 +142,200 @@ class DeepgramLocalService:
     
     def transcribe_audio_data(self, audio_data: bytes, **kwargs) -> Dict[str, Any]:
         """
-        Transcribe raw audio data with dynamic language/model selection and fallback logic
+        Transcribe raw audio data with robust fallback logic for your server
         """
-        language = kwargs.get('language', self.default_language)
-        model = kwargs.get('model')
+        original_language = kwargs.get('language', self.default_language)
+        original_model = kwargs.get('model', 'general-nova-3')
+        
+        # Get safe language/model combination
+        safe_language, safe_model = self.get_safe_language_model_combo(original_language, original_model)
+        
         smart_format = kwargs.get('smart_format', self.smart_format)
         punctuate = kwargs.get('punctuate', True)
         utterances = kwargs.get('utterances', True)
-        diarize = kwargs.get('diarize', True)  # Enable speaker diarization by default
+        diarize = kwargs.get('diarize', True)
         detect_language = kwargs.get('detect_language', False)
 
-        # If no model specified, use appropriate one for language
-        if not model:
-            model = self.get_model_for_language(language)
-
-        # Clean up model name
-        if model.endswith('.en') or model.endswith('.fr'):
-            model = model.rsplit('.', 1)[0]
-
+        # Build parameters for the API call
         params = {
-            'model': model,
+            'model': safe_model,
             'smart_format': str(smart_format).lower(),
             'punctuate': str(punctuate).lower(),
             'utterances': str(utterances).lower(),
             'diarize': str(diarize).lower(),
-            'detect_language': 'true' if detect_language else 'false',
-            'language': language if not detect_language else None
+            'detect_language': 'false'  # Disable auto-detect for reliability
         }
-        params = {k: v for k, v in params.items() if v is not None}
+        
+        # Only add language if not detecting
+        if not detect_language:
+            params['language'] = safe_language
 
-        def try_transcribe(params, model, language):
+        def try_transcribe(params_dict):
             try:
                 url = f"{self.base_url}/v1/listen"
-                logger.info(f"Transcribing with params: {params}")
+                
+                # Log the exact parameters being used
+                logger.info(f"Transcribing with params: {params_dict}")
+                
                 response = requests.post(
                     url,
-                    headers=self.headers,
-                    params=params,
+                    params=params_dict,
                     data=audio_data,
-                    timeout=60
+                    headers=self.headers,
+                    timeout=30
                 )
+                
                 if response.status_code == 200:
                     result = response.json()
-                    return self._format_response(result, model, language)
+                    return self._parse_deepgram_response(result, safe_model)
                 else:
-                    error_msg = f"Deepgram error {response.status_code}"
+                    error_text = response.text
                     try:
-                        error_detail = response.json()
-                        error_msg += f": {json.dumps(error_detail)}"
+                        error_json = response.json()
+                        error_text = json.dumps(error_json)
                     except:
-                        error_msg += f": {response.text[:200]}"
-                    logger.error(error_msg)
-                    return self._error_response(error_msg)
+                        pass
+                    
+                    logger.error(f"Deepgram error {response.status_code}: {error_text}")
+                    return self._error_response(f"Deepgram error {response.status_code}: {error_text}")
+                    
             except requests.exceptions.Timeout:
-                return self._error_response("Deepgram timeout - server took too long to respond")
-            except requests.exceptions.ConnectionError as e:
-                return self._error_response(f"Cannot connect to Deepgram at {self.base_url}: {str(e)}")
+                return self._error_response("Request timeout")
+            except requests.exceptions.RequestException as e:
+                return self._error_response(f"Network error: {str(e)}")
             except Exception as e:
-                return self._error_response(f"Transcription error: {str(e)}")
+                return self._error_response(f"Unexpected error: {str(e)}")
 
-        # Try primary
-        result = try_transcribe(params, model, language)
-
-        # Fallback logic if failed or empty transcript
-        if (not result.get('success')) or (not result.get('transcript')):
-            fallback_combos = [
-                (self.models.get('fr', 'nova-3'), 'fr-CA'),
-                (self.models.get('en', 'nova-3'), 'en-US'),
-                (self.models.get('default', 'nova-3'), self.default_language)
-            ]
-            for fb_model, fb_lang in fallback_combos:
-                if (model == fb_model and language == fb_lang):
-                    continue
-                fb_params = params.copy()
-                fb_params['model'] = fb_model
-                fb_params['language'] = fb_lang
-                fb_params['detect_language'] = 'false'
-                fb_result = try_transcribe(fb_params, fb_model, fb_lang)
-                if fb_result.get('success') and fb_result.get('transcript'):
-                    return fb_result
+        # Try the safe combination first
+        result = try_transcribe(params)
+        if result.get('success'):
+            return result
+        
+        # If that failed, try some fallback combinations
+        fallback_combinations = [
+            {'model': 'general-nova-3', 'language': 'fr-CA'},
+            {'model': 'general-nova-3', 'language': 'en-US'},
+            {'model': '2-general-nova', 'language': 'fr-CA'},
+        ]
+        
+        for fallback in fallback_combinations:
+            if (fallback['model'] == safe_model and 
+                fallback['language'] == safe_language):
+                continue  # Skip if already tried
+                
+            fallback_params = params.copy()
+            fallback_params.update(fallback)
+            
+            logger.info(f"Trying fallback: {fallback}")
+            fallback_result = try_transcribe(fallback_params)
+            
+            if fallback_result.get('success'):
+                logger.info("Fallback succeeded")
+                return fallback_result
+        
+        # If all attempts failed, return the original error
         return result
-    
-    def _format_response(self, result: Dict, model: str, language: str) -> Dict[str, Any]:
-        """Format Deepgram response with quality metrics and speaker diarization"""
+
+    def _parse_deepgram_response(self, response: Dict[str, Any], model_used: str = "unknown") -> Dict[str, Any]:
+        """Parse Deepgram API response"""
         try:
-            transcript = ""
-            confidence = 0.0
-            word_count = 0
-            word_confidences = []
-            word_timestamps = []
-            audio_duration = None
+            results = response.get('results', {})
+            channels = results.get('channels', [])
+            
+            if not channels:
+                return self._error_response("No transcription channels found")
+            
+            channel = channels[0]
+            alternatives = channel.get('alternatives', [])
+            
+            if not alternatives:
+                return self._error_response("No transcription alternatives found")
+            
+            alternative = alternatives[0]
+            transcript = alternative.get('transcript', '').strip()
+            confidence = alternative.get('confidence', 0.0)
+            
+            # Extract words and their timestamps/confidence
+            words = alternative.get('words', [])
+            word_confidences = [word.get('confidence', 0.0) for word in words]
+            word_timestamps = [
+                {
+                    'word': word.get('word', ''),
+                    'start': word.get('start', 0.0),
+                    'end': word.get('end', 0.0),
+                    'confidence': word.get('confidence', 0.0)
+                }
+                for word in words
+            ]
+            
+            # Extract utterances and speaker information
+            utterances = []
             speaker_segments = []
-
-            # Extract transcript, confidence, and word-level metrics
-            if 'results' in result and 'channels' in result['results']:
-                for channel in result['results']['channels']:
-                    for alternative in channel.get('alternatives', []):
-                        if 'transcript' in alternative:
-                            transcript += alternative['transcript'] + " "
-                        if 'confidence' in alternative:
-                            confidence = max(confidence, alternative['confidence'])
-                        if 'words' in alternative:
-                            word_count += len(alternative['words'])
-                            for word in alternative['words']:
-                                word_confidences.append(word.get('confidence'))
-                                word_timestamps.append({
-                                    'word': word.get('word'),
-                                    'start': word.get('start'),
-                                    'end': word.get('end'),
-                                    'confidence': word.get('confidence')
-                                })
-
-            transcript = transcript.strip()
-
-            # Extract utterances if available
-            utterances = result.get('results', {}).get('utterances', [])
-
-            # Extract audio duration if available
-            audio_duration = result.get('metadata', {}).get('duration')
-
-            # Speaker diarization: extract speaker segments if available
-            if utterances:
-                for utt in utterances:
-                    speaker_segments.append({
-                        'speaker': utt.get('speaker'),
-                        'start': utt.get('start'),
-                        'end': utt.get('end'),
-                        'transcript': utt.get('transcript')
-                    })
-
-            # Detect language if provided
-            detected_language = result.get('results', {}).get('language', language)
-
+            
+            for utterance in channel.get('utterances', []):
+                utterance_data = {
+                    'start': utterance.get('start', 0.0),
+                    'end': utterance.get('end', 0.0),
+                    'transcript': utterance.get('transcript', ''),
+                    'confidence': utterance.get('confidence', 0.0),
+                    'speaker': utterance.get('speaker', 0)
+                }
+                utterances.append(utterance_data)
+                
+                speaker_segments.append({
+                    'speaker': utterance.get('speaker', 0),
+                    'start': utterance.get('start', 0.0),
+                    'end': utterance.get('end', 0.0),
+                    'text': utterance.get('transcript', '')
+                })
+            
+            # Calculate audio duration from metadata
+            metadata = results.get('metadata', {})
+            audio_duration = metadata.get('duration')
+            
             return {
                 'success': True,
                 'transcript': transcript,
                 'confidence': confidence,
-                'word_count': word_count,
-                'model_used': model,
-                'language': detected_language,
-                'utterances': utterances,
+                'word_count': len(words),
                 'word_confidences': word_confidences,
                 'word_timestamps': word_timestamps,
-                'audio_duration': audio_duration,
+                'utterances': utterances,
                 'speaker_segments': speaker_segments,
-                'raw_response': result,
-                'source': 'deepgram_self_hosted',
-                'server': self.base_url,
-                'timestamp': datetime.now().isoformat()
+                'audio_duration': audio_duration,
+                'model_used': model_used,
+                'language': results.get('language', 'unknown')
             }
+            
         except Exception as e:
-            logger.error(f"Format error: {e}")
-            return self._error_response(f"Response format error: {str(e)}")
-    
-    def _error_response(self, error_msg: str) -> Dict[str, Any]:
-        """Create error response"""
+            return self._error_response(f"Response parsing error: {str(e)}")
+
+    def _error_response(self, error_message: str) -> Dict[str, Any]:
+        """Generate standardized error response"""
         return {
             'success': False,
-            'error': error_msg,
+            'error': error_message,
             'transcript': '',
-            'source': 'deepgram_self_hosted',
-            'server': self.base_url,
-            'connection_status': self.connection_status[0],
+            'confidence': 0,
+            'word_count': 0,
+            'word_confidences': [],
+            'word_timestamps': [],
+            'utterances': [],
+            'speaker_segments': [],
+            'audio_duration': None,
             'timestamp': datetime.now().isoformat()
         }
-    
-    def get_capabilities(self) -> Dict[str, Any]:
-        """Get Deepgram server capabilities"""
-        try:
-            # Try to get available models
-            url = f"{self.base_url}/v1/models"
-            response = requests.get(url, headers=self.headers, timeout=10)
-            
-            models = []
-            if response.status_code == 200:
-                try:
-                    models_data = response.json()
-                    if isinstance(models_data, list):
-                        models = [model.get('name', 'unknown') for model in models_data]
-                except:
-                    pass
-            
-            capabilities = {
-                'connected': self.connection_status[0],
-                'connection_message': self.connection_status[1],
-                'base_url': self.base_url,
-                'models_available': list(set(models)) if models else ['general-nova-3', '2-general-nova'],
-                'default_language': self.default_language,
-                'api_key_exists': bool(self.api_key and self.api_key != '1e7b06318100c48315a6e638b18e86b54263a4a1')
-            }
-            
-            return capabilities
-            
-        except Exception as e:
-            return {
-                'connected': False,
-                'error': str(e),
-                'base_url': self.base_url,
-                'models_available': ['general-nova-3', '2-general-nova']  # Based on your curl output
-            }
 
-# Create instance
-deepgram_local = DeepgramLocalService()
+    def get_capabilities(self) -> Dict[str, Any]:
+        """Get service capabilities and status"""
+        connected, status = self.connection_status
+        return {
+            'connected': connected,
+            'status': status,
+            'base_url': self.base_url,
+            'api_key_exists': bool(self.api_key),
+            'available_models': list(self.model_aliases.keys()),
+            'server_models': ['general-nova-3', '2-general-nova'],
+            'supported_languages': ['fr-CA', 'en-US'],
+            'default_language': self.default_language
+        }

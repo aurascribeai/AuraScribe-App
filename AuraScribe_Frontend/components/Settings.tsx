@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 
 // Fix for VITE_API_BASE_URL type error
@@ -52,6 +52,37 @@ interface SettingsProps {
   lang: Language;
 }
 
+interface PaymentInvoice {
+  id: string;
+  date: string;
+  amount: string;
+  status: 'paid' | 'due';
+  link?: string;
+}
+
+interface PaymentInfo {
+  planName: string;
+  renewalDate: string;
+  autoRenew: boolean;
+  usageNotes: string;
+  invoices: PaymentInvoice[];
+}
+
+const PAYMENT_STORAGE_KEY = 'aurascribe:payment-info';
+const PAYMENT_PORTAL_URL = 'https://link.waveapps.com/f6gmvq-6mkt2s';
+
+const defaultPaymentInfo: PaymentInfo = {
+  planName: 'AuraScribe Pro',
+  renewalDate: '2026-02-01',
+  autoRenew: true,
+  usageNotes: 'Notes traitées : 1 234 • Stockage utilisé : 2.1 Go',
+  invoices: [
+    { id: 'inv-202602', date: '2026-02-01', amount: '29,99$', status: 'paid', link: PAYMENT_PORTAL_URL },
+    { id: 'inv-202601', date: '2026-01-01', amount: '29,99$', status: 'paid', link: PAYMENT_PORTAL_URL },
+    { id: 'inv-202512', date: '2025-12-01', amount: '29,99$', status: 'paid', link: PAYMENT_PORTAL_URL }
+  ]
+};
+
 const Settings: React.FC<SettingsProps> = ({ lang }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'notifications' | 'clinical' | 'storage' | 'lab' | 'integrations' | 'templates' | 'payment' | 'production' | 'developer'>('profile');
   const [searchTerm, setSearchTerm] = useState('');
@@ -77,6 +108,40 @@ const Settings: React.FC<SettingsProps> = ({ lang }) => {
   
   // Work Preferences state
   const [clinicHours, setClinicHours] = useState('08:00-17:00');
+  const [paymentInfo, setPaymentInfo] = useState<PaymentInfo>(() => {
+    try {
+      const saved = localStorage.getItem(PAYMENT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      return defaultPaymentInfo;
+    }
+    return defaultPaymentInfo;
+  });
+  const [newInvoice, setNewInvoice] = useState({ date: '', amount: '', status: 'due' as 'paid' | 'due' });
+  const [paymentMethod, setPaymentMethod] = useState('Visa se terminant par 4242');
+  const [billingContact, setBillingContact] = useState('j.rousseau@clinique.ca');
+  const [taxInfo, setTaxInfo] = useState('NEQ: 1234567890 • TVQ: 1234567890 • TPS: 123456789');
+
+  useEffect(() => {
+    localStorage.setItem(PAYMENT_STORAGE_KEY, JSON.stringify(paymentInfo));
+  }, [paymentInfo]);
+
+  const updatePaymentField = (field: Partial<PaymentInfo>) => {
+    setPaymentInfo(prev => ({ ...prev, ...field }));
+  };
+
+  const handleAddInvoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newInvoice.date || !newInvoice.amount) return;
+    setPaymentInfo(prev => ({
+      ...prev,
+      invoices: [
+        { id: `inv-${Date.now()}`, date: newInvoice.date, amount: newInvoice.amount, status: newInvoice.status, link: PAYMENT_PORTAL_URL },
+        ...prev.invoices
+      ]
+    }));
+    setNewInvoice({ date: '', amount: '', status: 'due' });
+  };
   const [appointmentDuration, setAppointmentDuration] = useState(15);
   const [noteTemplate, setNoteTemplate] = useState('Standard');
   const [autoFollowUp, setAutoFollowUp] = useState(true);
@@ -195,13 +260,18 @@ const Settings: React.FC<SettingsProps> = ({ lang }) => {
   };
   
   const handleSetDefault = (template: any) => {
-    // Logic for setting default template
+    setTemplates(prev =>
+      prev.map(t => ({
+        ...t,
+        isDefault: t === template,
+      }))
+    );
   };
   
   const handleSaveTemplate = () => {
     if (editingTemplate) {
       // Update existing template
-      const updated = templates.map(t => 
+      const updated = templates.map(t =>
         t === editingTemplate ? {
           ...t,
           name: templateName,
@@ -213,12 +283,14 @@ const Settings: React.FC<SettingsProps> = ({ lang }) => {
       setTemplates(updated);
     } else {
       // Add new template
+      const hasDefault = templates.some(t => t.isDefault);
       const newTemplate = {
         name: templateName,
         category: templateCategory,
         specialty: templateSpecialty,
         content: templateContent,
-        shared: false
+        shared: false,
+        isDefault: !hasDefault
       };
       setTemplates([...templates, newTemplate]);
     }
@@ -264,7 +336,7 @@ const Settings: React.FC<SettingsProps> = ({ lang }) => {
                   <span className="bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{t.category}</span>
                   <span className="bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded">{t.specialty}</span>
                   <button className={`px-2 py-1 rounded ${t.shared ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} onClick={() => handleShareTemplate(t)}>{t.shared ? 'Partagé' : 'Privé'}</button>
-                  <button className={`px-2 py-1 rounded ${false ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`} onClick={() => handleSetDefault(t)}>Défaut</button>
+                  <button className={`px-2 py-1 rounded ${t.isDefault ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`} onClick={() => handleSetDefault(t)}>Défaut</button>
                 </div>
               </li>
             ))}
@@ -490,73 +562,197 @@ const Settings: React.FC<SettingsProps> = ({ lang }) => {
     </div>
   );
   
-  const renderPayment = () => (
+
+const renderPayment = () => {
+  const usageEntries = paymentInfo.usageNotes.split('�').map(entry => entry.trim()).filter(Boolean);
+  const invoiceSummary = paymentInfo.invoices.reduce(
+    (acc, invoice) => {
+      acc[invoice.status] += 1;
+      return acc;
+    },
+    { paid: 0, due: 0 }
+  );
+
+  return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-slate-200 dark:border-slate-800 shadow-sm space-y-8">
         <h3 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">Abonnement & Facturation</h3>
-        {/* Subscription Plan */}
-        <div className="flex flex-col md:flex-row gap-8 items-center justify-between">
-          <div className="flex-1">
-            <div className="text-lg font-bold text-blue-700 dark:text-blue-300">Plan actuel : <span className="font-black">AuraScribe Pro</span></div>
-            <div className="text-xs text-slate-500 mt-1">Renouvellement : <span className="font-bold">Mensuel</span> • Prochain paiement : 2026-02-01</div>
-            <div className="flex gap-4 mt-3">
-              <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-bold uppercase border border-emerald-100">Actif</span>
-              <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-bold uppercase border border-blue-100">Auto-renouvellement</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Nom du plan</label>
+              <input
+                className="w-full mt-2 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                value={paymentInfo.planName}
+                onChange={e => updatePaymentField({ planName: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Prochain paiement</label>
+              <input
+                type="date"
+                className="w-full mt-2 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                value={paymentInfo.renewalDate}
+                onChange={e => updatePaymentField({ renewalDate: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="auto-renew"
+                checked={paymentInfo.autoRenew}
+                onChange={e => updatePaymentField({ autoRenew: e.target.checked })}
+                className="accent-blue-600 w-5 h-5 rounded-xl"
+              />
+              <label htmlFor="auto-renew" className="text-xs font-bold text-slate-600 dark:text-slate-300">Renouvellement automatique</label>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Notes d'utilisation</label>
+              <textarea
+                className="w-full mt-2 px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                rows={3}
+                value={paymentInfo.usageNotes}
+                onChange={e => updatePaymentField({ usageNotes: e.target.value })}
+              />
             </div>
           </div>
-          <div className="flex flex-col items-center gap-2">
-            <CreditCard size={48} className="text-blue-600" />
-            <button className="mt-2 px-8 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl font-black text-base uppercase tracking-widest shadow-xl shadow-amber-500/20 transition-all active:scale-95">Gérer le paiement</button>
+          <div className="relative rounded-[2rem] border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 p-6 flex flex-col justify-between">
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Statut du plan</p>
+              <p className="text-xl font-black text-slate-800 dark:text-white">{paymentInfo.planName}</p>
+              <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.3em]">
+                <span className="px-3 py-1 rounded-xl bg-blue-50 dark:bg-blue-900/50 text-blue-600">{paymentInfo.autoRenew ? 'Auto-renouvellement' : 'Paiement manuel'}</span>
+                <span className="px-3 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600">{paymentInfo.renewalDate}</span>
+              </div>
+            </div>
+            <div className="flex gap-3 items-center mt-6">
+              <CreditCard size={48} className="text-blue-600" />
+              <a
+                className="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-amber-500/20 transition-all active:scale-95"
+                href={PAYMENT_PORTAL_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Gerer le paiement
+              </a>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-4 uppercase tracking-[0.2em]">{usageEntries.length ? usageEntries[0] : "Statistiques d'utilisation a jour."}</p>
           </div>
         </div>
-        {/* Usage Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
-          <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6">
-            <div className="text-xs font-bold text-slate-400 uppercase mb-2">Statistiques d'utilisation</div>
-            <div className="flex flex-col gap-2">
-              <span>Notes traitées : <span className="font-black text-blue-700">1,234</span></span>
-              <span>Stockage utilisé : <span className="font-black text-blue-700">2.1 Go</span></span>
+          <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-500">Statistiques d'utilisation</p>
+              <span className="text-[10px] text-slate-500">{usageEntries.length} indicateur(s)</span>
+            </div>
+            <div className="space-y-2">
+              {usageEntries.length === 0 ? (
+                <p className="text-[10px] text-slate-500">Aucune statistique renseignee.</p>
+              ) : (
+                usageEntries.map((entry, idx) => (
+                  <p key={idx} className="text-sm font-bold text-slate-700 dark:text-slate-200">{entry}</p>
+                ))
+              )}
+            </div>
+            <div className="flex gap-2">
+              <span className="px-3 py-1 rounded-xl bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-[0.3em]">{invoiceSummary.paid} payee(s)</span>
+              <span className="px-3 py-1 rounded-xl bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-[0.3em]">{invoiceSummary.due} en attente</span>
             </div>
           </div>
-          {/* Invoice History */}
-          <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6">
-            <div className="text-xs font-bold text-slate-400 uppercase mb-2">Historique des factures</div>
-            <ul className="text-xs space-y-1">
-              <li>2026-01-01 • 29,99$ • <a href="#" className="text-blue-600 underline">Télécharger</a></li>
-              <li>2025-12-01 • 29,99$ • <a href="#" className="text-blue-600 underline">Télécharger</a></li>
-              <li>2025-11-01 • 29,99$ • <a href="#" className="text-blue-600 underline">Télécharger</a></li>
+          <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-500">Historique des factures</p>
+              <span className="text-[10px] text-slate-500">{paymentInfo.invoices.length} facture(s)</span>
+            </div>
+            <ul className="space-y-3 max-h-64 overflow-y-auto pr-2">
+              {paymentInfo.invoices.map(invoice => (
+                <li key={invoice.id} className="rounded-2xl border border-slate-100 dark:border-slate-700 p-4 bg-white/70 dark:bg-slate-900/60 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold">{invoice.date} � {invoice.amount}</p>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400">{invoice.id}</p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.3em] ${invoice.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {invoice.status === 'paid' ? 'Payee' : 'En attente'}
+                    </span>
+                  </div>
+                  <a
+                    className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-600 underline"
+                    href={invoice.link ?? PAYMENT_PORTAL_URL}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    Telecharger / Voir
+                  </a>
+                </li>
+              ))}
             </ul>
+            <form onSubmit={handleAddInvoice} className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="date"
+                  value={newInvoice.date}
+                  onChange={e => setNewInvoice(prev => ({ ...prev, date: e.target.value }))}
+                  className="px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <input
+                  type="text"
+                  placeholder="Montant"
+                  value={newInvoice.amount}
+                  onChange={e => setNewInvoice(prev => ({ ...prev, amount: e.target.value }))}
+                  className="px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <select
+                  value={newInvoice.status}
+                  onChange={e => setNewInvoice(prev => ({ ...prev, status: e.target.value as 'paid' | 'due' }))}
+                  className="px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="paid">Payee</option>
+                  <option value="due">En attente</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-indigo-500/20 transition-all hover:-translate-y-0.5 active:scale-[0.98]"
+              >
+                Ajouter une facture
+              </button>
+            </form>
           </div>
         </div>
-        {/* Payment Method & Tax Info */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Méthode de paiement</label>
-              <input type="text" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl text-sm p-4" value="Visa se terminant par 4242" readOnly />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Contact de facturation</label>
-              <input type="text" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl text-sm p-4" value="j.rousseau@clinique.ca" readOnly />
-            </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Methode de paiement</label>
+            <input
+              className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={paymentMethod}
+              onChange={e => setPaymentMethod(e.target.value)}
+            />
           </div>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">Informations fiscales</label>
-              <input type="text" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl text-sm p-4 mb-2" value="NEQ: 1234567890" readOnly />
-              <input type="text" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl text-sm p-4" value="TVQ: 1234567890 • TPS: 123456789" readOnly />
-            </div>
-            <div className="flex items-center gap-3 mt-2">
-              <input type="checkbox" id="auto-renew" checked readOnly className="accent-blue-600 w-5 h-5 rounded-xl" />
-              <label htmlFor="auto-renew" className="text-xs font-bold text-slate-600 dark:text-slate-300">Renouvellement automatique activé</label>
-            </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Contact de facturation</label>
+            <input
+              className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              value={billingContact}
+              onChange={e => setBillingContact(e.target.value)}
+            />
           </div>
+        </div>
+        <div className="space-y-2 mt-4">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Informations fiscales</label>
+          <textarea
+            rows={3}
+            className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            value={taxInfo}
+            onChange={e => setTaxInfo(e.target.value)}
+          />
         </div>
       </div>
     </div>
   );
-  
-  const renderProductionReadiness = () => (
+};
+
+const renderProductionReadiness = () => (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-10 border border-slate-200 dark:border-slate-800 shadow-sm space-y-8">
         <div className="flex items-center gap-6">

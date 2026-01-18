@@ -64,16 +64,17 @@ const RAMQBilling: React.FC<RAMQBillingProps> = ({ lang, sessions, bills, onSend
   };
 
   const handleSend = () => {
-    if (!selectedSession || !currentBill.serviceCode) return;
+    const { serviceCode, diagnosticCode, amount } = currentBill;
+    if (!selectedSession || !serviceCode || !diagnosticCode || amount == null) return;
     const newBill: RAMQBill = {
       id: Date.now().toString(),
       sessionId: selectedSession.id,
       patientInitials: selectedSession.patientInfo.fullName.split(' ').map(n => n[0]).join(''),
       patientRamq: selectedSession.patientInfo.ramq.substring(0, 4) + ' •••• ••••',
       date: new Date().toLocaleDateString(lang === 'fr' ? 'fr-CA' : 'en-CA'),
-      serviceCode: currentBill.serviceCode!,
-      diagnosticCode: currentBill.diagnosticCode!,
-      amount: currentBill.amount!,
+      serviceCode,
+      diagnosticCode,
+      amount,
       status: 'sent',
       transmissionDate: new Date().toISOString()
     };

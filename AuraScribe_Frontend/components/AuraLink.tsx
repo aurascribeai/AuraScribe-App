@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { Language, AuraLinkTransfer, ClinicalFile, Session } from '../types';
 import { TRANSLATIONS } from '../constants';
-import { uploadClinicalFile } from '../services/backendApi';
+import { uploadClinicalFile, createAuraLinkTransfer, listAuraLinkTransfers, deleteAuraLinkTransfer } from '../services/backendApi';
 
 interface AuraLinkProps {
   lang: Language;
@@ -42,6 +42,9 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
   const [view, setView] = useState<'dashboard' | 'wizard'>('dashboard');
   const [transfers, setTransfers] = useState<AuraLinkTransfer[]>([]);
   const [step, setStep] = useState(1);
+  const [loadingTransfers, setLoadingTransfers] = useState(true);
+  const [accessLink, setAccessLink] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
 
   // Wizard State
   const [selectedFile, setSelectedFile] = useState<ClinicalFile | null>(null);
@@ -58,55 +61,133 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
 
   const t = (key: string) => TRANSLATIONS[key]?.[lang] || key;
 
+  // Fetch transfers from backend on mount
+  React.useEffect(() => {
+    void fetchTransfers();
+  }, []);
+
+  const fetchTransfers = async () => {
+    try {
+      setLoadingTransfers(true);
+      const result = await listAuraLinkTransfers();
+      if (result.success && result.transfers) {
+        // Map backend transfers to frontend format
+        const mappedTransfers: AuraLinkTransfer[] = result.transfers.map((t: any) => ({
+          id: t.id,
+          file: {
+            id: t.id,
+            name: t.file?.name || 'Document',
+            type: t.file?.type || 'pdf',
+            size: t.file?.size || 'unknown'
+          },
+          recipientEmail: t.recipient_email,
+          permissions: t.permissions || { read: true, download: false, edit: false },
+          security: {
+            method: 'token',
+            value: '',
+            antiCapture: true
+          },
+          expiry: t.expiry || '24h',
+          status: t.status || 'active'
+        }));
+        setTransfers(mappedTransfers);
+      }
+    } catch (err) {
+      console.error('Failed to fetch transfers:', err);
+    } finally {
+      setLoadingTransfers(false);
+    }
+  };
+
+  const handleDeleteTransfer = async (transferId: string) => {
+    if (!confirm(lang === 'fr' ? 'Voulez-vous révoquer ce partage ?' : 'Do you want to revoke this share?')) {
+      return;
+    }
+    try {
+      const result = await deleteAuraLinkTransfer(transferId);
+      if (result.success) {
+        setTransfers(transfers.filter(t => t.id !== transferId));
+      }
+    } catch (err) {
+      console.error('Failed to delete transfer:', err);
+    }
+  };
+
   const handleCreateTransfer = async () => {
     if (!selectedFile || !email) {
-      setUploadError('Sélectionnez un fichier local et un destinataire.');
+      setUploadError(lang === 'fr' ? 'Sélectionnez un fichier local et un destinataire.' : 'Select a local file and a recipient.');
       return;
     }
     if (selectedFile.type === 'form') {
-      setUploadError("Les formulaires internes ne peuvent pas encore être partagés. Téléversez un PDF ou une image.");
+      setUploadError(lang === 'fr' ? "Les formulaires internes ne peuvent pas encore être partagés. Téléversez un PDF ou une image." : "Internal forms cannot be shared yet. Upload a PDF or image.");
       return;
     }
 
     try {
       setUploadError(null);
+      setUploading(true);
+
       let backendFileUrl = selectedFile.url || '';
+
+      // Upload file if it's a local file
       if (selectedFile.fileObject) {
-        setUploading(true);
         const uploadResult = await uploadClinicalFile(selectedFile.fileObject);
         backendFileUrl = uploadResult.file_url || uploadResult.fileUrl || uploadResult.url || '';
         if (!uploadResult.success || !backendFileUrl) {
-          setUploadError('Le téléchargement du fichier a échoué. Réessayez avec un PDF ou une image.');
+          setUploadError(lang === 'fr' ? 'Le téléchargement du fichier a échoué. Réessayez avec un PDF ou une image.' : 'File upload failed. Try again with a PDF or image.');
           return;
         }
       }
 
       if (!backendFileUrl) {
-        setUploadError('Impossible de créer un lien sans fichier exporté.');
+        setUploadError(lang === 'fr' ? 'Impossible de créer un lien sans fichier exporté.' : 'Cannot create a link without an exported file.');
         return;
       }
 
-      const token = Math.random().toString(36).substring(2, 10).toUpperCase();
+      // Create transfer via backend API
+      const transferResult = await createAuraLinkTransfer({
+        file_url: backendFileUrl,
+        file_name: selectedFile.name,
+        file_type: selectedFile.type,
+        file_size: selectedFile.size,
+        recipient_email: email,
+        permissions: perms,
+        security_method: securityMethod,
+        password: securityMethod === 'password' ? password : undefined,
+        anti_capture: antiCapture,
+        expiry: expiry
+      });
+
+      if (!transferResult.success) {
+        setUploadError(transferResult.error || (lang === 'fr' ? 'Erreur lors de la création du partage.' : 'Error creating the share.'));
+        return;
+      }
+
+      // Update state with result from backend
+      setGeneratedToken(transferResult.access_token || '');
+      setAccessLink(transferResult.access_link || '');
+      setEmailSent(transferResult.email_sent || false);
+
+      // Add to local transfers list
       const newTransfer: AuraLinkTransfer = {
-        id: Date.now().toString(),
+        id: transferResult.transfer_id,
         file: { ...selectedFile, url: backendFileUrl },
         recipientEmail: email,
         permissions: perms,
         security: {
           method: securityMethod,
-          value: securityMethod === 'token' ? token : password,
+          value: securityMethod === 'token' ? transferResult.access_token : password,
           antiCapture
         },
         expiry,
         status: 'active'
       };
 
-      setGeneratedToken(token);
       setTransfers([newTransfer, ...transfers]);
       setStep(4); // Show success screen with token/info
     } catch (err) {
-      console.error('File upload error:', err);
-      setUploadError('Le téléchargement du fichier a échoué. Vérifiez votre connexion et réessayez.');
+      console.error('Transfer creation error:', err);
+      setUploadError(lang === 'fr' ? 'Le téléchargement du fichier a échoué. Vérifiez votre connexion et réessayez.' : 'File upload failed. Check your connection and try again.');
     } finally {
       setUploading(false);
     }
@@ -118,6 +199,11 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
     setSelectedFile(null);
     setEmail('');
     setGeneratedToken('');
+    setAccessLink('');
+    setEmailSent(false);
+    setPassword('');
+    setUploadError(null);
+    void fetchTransfers(); // Refresh transfers list
   };
 
   const renderDashboard = () => (
@@ -172,7 +258,16 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{t('active_transfers')}</h3>
         </div>
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {transfers.length > 0 ? transfers.map(tr => (
+          {loadingTransfers ? (
+            <div className="p-20 text-center space-y-4">
+              <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto">
+                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <p className="text-slate-500 text-sm">
+                {lang === 'fr' ? 'Chargement des transferts...' : 'Loading transfers...'}
+              </p>
+            </div>
+          ) : transfers.length > 0 ? transfers.map(tr => (
             <div key={tr.id} className="p-6 flex flex-wrap items-center justify-between gap-4 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-lg flex items-center justify-center text-blue-600">
@@ -185,23 +280,29 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
               </div>
 
               <div className="flex gap-2">
-                {tr.permissions.read && <span className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg" title="Lecture"><Eye size={14} /></span>}
-                {tr.permissions.download && <span className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg" title="Téléchargement"><Download size={14} /></span>}
-                {tr.permissions.edit && <span className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg" title="Modification"><Edit3 size={14} /></span>}
+                {tr.permissions.read && <span className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg" title={lang === 'fr' ? 'Lecture' : 'Read'}><Eye size={14} /></span>}
+                {tr.permissions.download && <span className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg" title={lang === 'fr' ? 'Téléchargement' : 'Download'}><Download size={14} /></span>}
+                {tr.permissions.edit && <span className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg" title={lang === 'fr' ? 'Modification' : 'Edit'}><Edit3 size={14} /></span>}
                 {tr.security.antiCapture && <span className="p-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-lg" title="Anti-Capture"><CameraOff size={14} /></span>}
               </div>
 
               <div className="flex items-center gap-6">
                 <div className="text-right">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Expire dans</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {lang === 'fr' ? 'Expire dans' : 'Expires in'}
+                  </p>
                   <div className="flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-slate-300">
                     <Clock size={12} className="text-blue-500" /> {tr.expiry}
                   </div>
                 </div>
                 <div className="px-3 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 rounded-full text-[10px] font-bold uppercase tracking-wider border border-emerald-100 dark:border-emerald-800">
-                  Actif
+                  {lang === 'fr' ? 'Actif' : 'Active'}
                 </div>
-                <button className="text-slate-400 hover:text-rose-600 transition-colors">
+                <button
+                  onClick={() => handleDeleteTransfer(tr.id)}
+                  className="text-slate-400 hover:text-rose-600 transition-colors"
+                  title={lang === 'fr' ? 'Révoquer le partage' : 'Revoke share'}
+                >
                   <Trash2 size={18} />
                 </button>
               </div>
@@ -211,7 +312,9 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
               <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-300">
                 <ShieldCheck size={32} />
               </div>
-              <p className="text-slate-500 text-sm">Aucun transfert sécurisé actif.</p>
+              <p className="text-slate-500 text-sm">
+                {lang === 'fr' ? 'Aucun transfert sécurisé actif.' : 'No active secure transfers.'}
+              </p>
             </div>
           )}
         </div>
@@ -500,23 +603,79 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
               <CheckCircle2 size={48} />
             </div>
             <div>
-              <h3 className="text-3xl font-bold heading-font text-slate-800 dark:text-white">Partage réussi !</h3>
-              <p className="text-slate-500 max-w-sm mx-auto mt-2">Le lien sécurisé a été préparé pour <strong>{email}</strong>.</p>
+              <h3 className="text-3xl font-bold heading-font text-slate-800 dark:text-white">
+                {lang === 'fr' ? 'Partage réussi !' : 'Share Successful!'}
+              </h3>
+              <p className="text-slate-500 max-w-sm mx-auto mt-2">
+                {lang === 'fr'
+                  ? <>Le lien sécurisé a été préparé pour <strong>{email}</strong>.</>
+                  : <>The secure link has been prepared for <strong>{email}</strong>.</>
+                }
+              </p>
+              {emailSent && (
+                <p className="text-emerald-600 text-sm mt-2 flex items-center justify-center gap-2">
+                  <Mail size={14} />
+                  {lang === 'fr' ? 'Courriel de notification envoyé' : 'Notification email sent'}
+                </p>
+              )}
             </div>
 
-            <div className="w-full max-w-sm p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 space-y-4">
+            <div className="w-full max-w-md p-6 bg-slate-50 dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 space-y-4">
+              {/* Access Link */}
+              {accessLink && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {lang === 'fr' ? 'Lien d\'accès sécurisé' : 'Secure Access Link'}
+                  </p>
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <input
+                      type="text"
+                      readOnly
+                      value={accessLink}
+                      className="w-full bg-transparent text-xs text-slate-600 dark:text-slate-300 font-mono outline-none"
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                    />
+                  </div>
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(accessLink);
+                      }}
+                    className="text-xs text-blue-600 hover:text-blue-700 font-bold mt-1"
+                  >
+                    {lang === 'fr' ? 'Copier le lien' : 'Copy link'}
+                  </button>
+                </div>
+              )}
+
+              {/* Access Token */}
               <div className="space-y-1">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jeton d'accès sécurisé</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  {lang === 'fr' ? 'Jeton d\'accès sécurisé' : 'Secure Access Token'}
+                </p>
                 <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-blue-100 dark:border-blue-900 flex items-center justify-between">
-                  <span className="text-2xl font-mono font-bold text-blue-600 tracking-widest">{securityMethod === 'token' ? generatedToken : '••••••••'}</span>
-                  <button className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-400">
+                  <span className="text-2xl font-mono font-bold text-blue-600 tracking-widest">
+                    {securityMethod === 'token' ? generatedToken.substring(0, 12) + '...' : '••••••••'}
+                  </span>
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(generatedToken);
+                      }}
+                    className="p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg text-slate-400"
+                    title={lang === 'fr' ? 'Copier le jeton' : 'Copy token'}
+                  >
                     <Lock size={18} />
                   </button>
                 </div>
               </div>
+
               <div className="flex items-start gap-3 text-left p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
                 <AlertCircle className="text-blue-600 shrink-0" size={14} />
-                <p className="text-[10px] text-blue-800 dark:text-blue-300">Communiquez ce jeton au destinataire par un canal distinct (ex: SMS ou appel) pour une sécurité maximale.</p>
+                <p className="text-[10px] text-blue-800 dark:text-blue-300">
+                  {lang === 'fr'
+                    ? 'Communiquez ce jeton au destinataire par un canal distinct (ex: SMS ou appel) pour une sécurité maximale.'
+                    : 'Share this token with the recipient via a separate channel (e.g., SMS or call) for maximum security.'
+                  }
+                </p>
               </div>
             </div>
 
@@ -524,7 +683,7 @@ const AuraLink: React.FC<AuraLinkProps> = ({ lang, sessions }) => {
               onClick={resetWizard}
               className="px-10 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all"
             >
-              Retour au tableau de bord
+              {lang === 'fr' ? 'Retour au tableau de bord' : 'Back to Dashboard'}
             </button>
           </div>
         )}

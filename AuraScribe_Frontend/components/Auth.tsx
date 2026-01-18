@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Stethoscope,
   Mail,
@@ -19,10 +19,34 @@ interface AuthProps {
   lang: 'fr' | 'en';
 }
 
+interface GoogleProfile {
+  name?: string;
+  email?: string;
+  picture?: string;
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts?: {
+        id: {
+          initialize: (options: { client_id: string; callback: (response: any) => void }) => void;
+          renderButton: (element: HTMLElement, options: { theme: string; size: string; width?: string }) => void;
+          prompt: () => void;
+        };
+      };
+    };
+  }
+}
+
+const CLIENT_ID = '804651438822-tht7i2i5opqd0ea1vqcjtjekl1mvfgfl.apps.googleusercontent.com';
+
 const Auth: React.FC<AuthProps> = ({ onLogin, lang }) => {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [isLoading, setIsLoading] = useState(false);
-  
+  const getInitialGoogleReady = () => typeof window !== 'undefined' && !!window.google?.accounts?.id;
+  const [googleReady, setGoogleReady] = useState(getInitialGoogleReady);
+
   const [formData, setFormData] = useState({
     fullName: '',
     clinicName: '',
@@ -32,6 +56,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang }) => {
     role: 'Physician'
   });
 
+  const [googleProfile, setGoogleProfile] = useState<GoogleProfile | null>(null);
+
   const roles = [
     { id: 'Physician', label: lang === 'fr' ? 'Médecin de Famille' : 'Family Physician' },
     { id: 'Specialist', label: lang === 'fr' ? 'Médecin Spécialiste' : 'Specialist' },
@@ -40,11 +66,68 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang }) => {
     { id: 'Admin', label: lang === 'fr' ? 'Administrateur Clinique' : 'Clinic Admin' },
   ];
 
+  useEffect(() => {
+    const scriptId = 'google-client-script';
+    if (document.getElementById(scriptId)) {
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setGoogleReady(true);
+    document.body.appendChild(script);
+  }, []);
+
+  const handleGoogleResponse = useCallback((response: google.accounts.id.CredentialResponse) => {
+    if (!response.credential) return;
+    const base64Url = response.credential.split('.')[1];
+    const jsonPayload = decodeURIComponent(atob(base64Url).split('').map((c) => `%${('00' + c.charCodeAt(0).toString(16)).slice(-2)}`).join(''));
+    const payload = JSON.parse(jsonPayload);
+    setGoogleProfile({
+      name: payload.name,
+      email: payload.email
+    });
+    onLogin({
+      fullName: payload.name || 'Dr. Aura',
+      clinicName: 'Aura Clinic',
+      licenseNumber: payload.sub,
+      email: payload.email,
+      role: 'Physician'
+    });
+  }, [onLogin]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const scriptId = 'google-client-script';
+    if (window.google?.accounts?.id) return;
+    if (document.getElementById(scriptId)) return;
+    const script = document.createElement('script');
+    script.id = scriptId;
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setGoogleReady(true);
+    document.body.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    if (!googleReady || typeof window === 'undefined' || !window.google?.accounts?.id) return;
+    window.google.accounts.id.initialize({
+      client_id: CLIENT_ID,
+      callback: handleGoogleResponse
+    });
+    const button = document.getElementById('google-signin-button');
+    if (button) {
+      window.google.accounts.id.renderButton(button, { theme: 'outline', size: 'large', width: '100%' });
+    }
+  }, [googleReady, handleGoogleResponse]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate API delay
     setTimeout(() => {
       setIsLoading(false);
       onLogin({
@@ -198,8 +281,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang }) => {
                </label>
                <div className="relative">
                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                 <input 
-                   type="password" 
+                 <input
+                   type="password"
                    required
                    value={formData.password}
                    onChange={e => setFormData({...formData, password: e.target.value})}
@@ -207,6 +290,42 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang }) => {
                    placeholder="••••••••"
                  />
                </div>
+               {/* Password strength indicator */}
+               {mode === 'signup' && formData.password && (
+                 <div className="px-1 space-y-1.5">
+                   <div className="flex gap-1">
+                     {[1, 2, 3, 4].map(level => {
+                       const strength =
+                         (formData.password.length >= 8 ? 1 : 0) +
+                         (/[A-Z]/.test(formData.password) ? 1 : 0) +
+                         (/[0-9]/.test(formData.password) ? 1 : 0) +
+                         (/[^A-Za-z0-9]/.test(formData.password) ? 1 : 0);
+                       const colors = ['bg-rose-500', 'bg-orange-500', 'bg-yellow-500', 'bg-emerald-500'];
+                       return (
+                         <div
+                           key={level}
+                           className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                             level <= strength ? colors[strength - 1] : 'bg-slate-200 dark:bg-slate-700'
+                           }`}
+                         />
+                       );
+                     })}
+                   </div>
+                   <p className="text-[10px] text-slate-400">
+                     {(() => {
+                       const strength =
+                         (formData.password.length >= 8 ? 1 : 0) +
+                         (/[A-Z]/.test(formData.password) ? 1 : 0) +
+                         (/[0-9]/.test(formData.password) ? 1 : 0) +
+                         (/[^A-Za-z0-9]/.test(formData.password) ? 1 : 0);
+                       const labels = lang === 'fr'
+                         ? ['Faible', 'Moyen', 'Bon', 'Excellent']
+                         : ['Weak', 'Fair', 'Good', 'Excellent'];
+                       return strength > 0 ? labels[strength - 1] : (lang === 'fr' ? 'Trop court' : 'Too short');
+                     })()}
+                   </p>
+                 </div>
+               )}
              </div>
 
              <button 
@@ -217,9 +336,17 @@ const Auth: React.FC<AuthProps> = ({ onLogin, lang }) => {
                {isLoading ? <Loader2 size={20} className="animate-spin" /> : (mode === 'login' ? (lang === 'fr' ? 'Connexion' : 'Login') : (lang === 'fr' ? 'S\'inscrire' : 'Sign Up'))}
                {!isLoading && <ArrowRight size={18} />}
              </button>
-           </form>
+            </form>
 
-           <div className="mt-8 pt-8 border-t border-slate-100 dark:border-slate-800 text-center">
+            <div className="mt-6 space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 text-center">OU connectez-vous avec</p>
+              <div id="google-signin-button" className="w-full"></div>
+              {!googleReady && (
+                <p className="text-xs text-slate-500 text-center">Chargement de l’authentification Google…</p>
+              )}
+            </div>
+
+            <div className="mt-8 pt-8 border-t border-slate-100 dark:border-slate-800 text-center">
              <p className="text-xs text-slate-500 mb-2">
                {mode === 'login' ? (lang === 'fr' ? 'Pas encore de compte ?' : "Don't have an account?") : (lang === 'fr' ? 'Déjà un compte ?' : "Already have an account?")}
              </p>

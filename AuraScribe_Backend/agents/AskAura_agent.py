@@ -1,57 +1,115 @@
 # AskAura_agent - Interactive assistant for medical queries
-# Standalone implementation without google.adk dependency
+# Enhanced version with improved clinical reasoning and bilingual support
 import re
- # --- PERSONA SUPPORT ---
-# Simple persona system - just copy and paste this into each agent
+from datetime import datetime
 
+# --- PERSONA SUPPORT ---
 PERSONAS = {
     "generalist": {
-        "name": "General Doctor",
-        "focus": "Everything - general care"
+        "name": "Médecin Généraliste",
+        "name_en": "General Practitioner",
+        "focus": "Soins primaires et médecine familiale",
+        "focus_en": "Primary care and family medicine",
+        "expertise": ["preventive care", "chronic disease management", "initial diagnosis"]
     },
     "cardiologist": {
-        "name": "Heart Specialist",
-        "focus": "Heart and blood pressure"
+        "name": "Cardiologue",
+        "name_en": "Cardiologist",
+        "focus": "Maladies cardiovasculaires",
+        "focus_en": "Cardiovascular diseases",
+        "expertise": ["heart failure", "arrhythmias", "coronary artery disease", "hypertension"]
     },
     "pulmonologist": {
-        "name": "Lung Specialist", 
-        "focus": "Lungs and breathing"
+        "name": "Pneumologue",
+        "name_en": "Pulmonologist",
+        "focus": "Maladies respiratoires",
+        "focus_en": "Respiratory diseases",
+        "expertise": ["COPD", "asthma", "pneumonia", "lung cancer", "sleep apnea"]
     },
     "neurologist": {
-        "name": "Brain Specialist",
-        "focus": "Brain and nerves"
+        "name": "Neurologue",
+        "name_en": "Neurologist",
+        "focus": "Système nerveux",
+        "focus_en": "Nervous system",
+        "expertise": ["stroke", "epilepsy", "headache", "Parkinson's", "multiple sclerosis"]
+    },
+    "psychiatrist": {
+        "name": "Psychiatre",
+        "name_en": "Psychiatrist",
+        "focus": "Santé mentale",
+        "focus_en": "Mental health",
+        "expertise": ["depression", "anxiety", "bipolar disorder", "schizophrenia", "PTSD"]
+    },
+    "pediatrician": {
+        "name": "Pédiatre",
+        "name_en": "Pediatrician",
+        "focus": "Santé des enfants",
+        "focus_en": "Child health",
+        "expertise": ["growth", "development", "vaccinations", "pediatric infections"]
     }
 }
 
-def apply_persona(persona_key="generalist"):
+def apply_persona(persona_key="generalist", language="fr"):
     """Apply persona to the agent's responses"""
     persona = PERSONAS.get(persona_key, PERSONAS["generalist"])
-    return f"\n[Perspective: {persona['name']} - {persona['focus']}]\n"
-from datetime import datetime
+    if language == "fr":
+        return f"\n[Perspective: {persona['name']} - {persona['focus']}]\n"
+    return f"\n[Perspective: {persona['name_en']} - {persona['focus_en']}]\n"
 
 class AskAuraAgentWrapper:
     def __init__(self, name="AskAura"):
         self.name = name
+        self.persona_key = "generalist"
+
+        # Enhanced medical contexts with clinical decision support
         self.medical_contexts = {
+            # Pain assessment
             "douleur": {
-                "questions": ["localisation", "intensité", "durée", "caractère", "facteurs aggravants"],
+                "questions": ["localisation", "intensité", "durée", "caractère", "facteurs aggravants", "irradiation"],
                 "recommendations": [
                     "Évaluer l'échelle de douleur (0-10)",
                     "Rechercher les signes d'urgence (douleur thoracique, abdomen aigu)",
                     "Considérer les diagnostics différentiels selon la localisation",
-                    "Documenter le traitement antalgique actuel et son efficacité"
+                    "Documenter le traitement antalgique actuel et son efficacité",
+                    "Évaluer l'impact fonctionnel sur les activités quotidiennes"
                 ],
-                "red_flags": ["douleur thoracique", "céphalée explosive", "douleur abdominale sévère"]
+                "red_flags": ["douleur thoracique", "céphalée explosive", "douleur abdominale sévère", "douleur au repos"],
+                "differential_diagnosis": ["musculoskeletal", "neuropathic", "visceral", "inflammatory"]
             },
             "pain": {
-                "questions": ["location", "intensity", "duration", "character", "aggravating factors"],
+                "questions": ["location", "intensity", "duration", "character", "aggravating factors", "radiation"],
                 "recommendations": [
                     "Assess pain scale (0-10)",
                     "Check for red flags (chest pain, acute abdomen)",
                     "Consider differential diagnosis based on location",
-                    "Document current analgesic treatment and efficacy"
+                    "Document current analgesic treatment and efficacy",
+                    "Evaluate functional impact on daily activities"
                 ],
-                "red_flags": ["chest pain", "thunderclap headache", "severe abdominal pain"]
+                "red_flags": ["chest pain", "thunderclap headache", "severe abdominal pain", "pain at rest"],
+                "differential_diagnosis": ["musculoskeletal", "neuropathic", "visceral", "inflammatory"]
+            },
+            # Cardiovascular
+            "cardiaque": {
+                "questions": ["dyspnée", "palpitations", "œdème", "syncope", "douleur thoracique"],
+                "recommendations": [
+                    "ECG 12 dérivations",
+                    "Évaluation des signes vitaux et saturation",
+                    "Auscultation cardiaque et pulmonaire",
+                    "Évaluer les facteurs de risque cardiovasculaire"
+                ],
+                "red_flags": ["douleur thoracique à l'effort", "syncope", "dyspnée de repos"],
+                "differential_diagnosis": ["SCA", "insuffisance cardiaque", "arythmie", "EP"]
+            },
+            "cardiac": {
+                "questions": ["dyspnea", "palpitations", "edema", "syncope", "chest pain"],
+                "recommendations": [
+                    "12-lead ECG",
+                    "Vital signs and oxygen saturation",
+                    "Cardiac and pulmonary auscultation",
+                    "Assess cardiovascular risk factors"
+                ],
+                "red_flags": ["exertional chest pain", "syncope", "dyspnea at rest"],
+                "differential_diagnosis": ["ACS", "heart failure", "arrhythmia", "PE"]
             },
             "toux": {
                 "questions": ["durée", "productivité", "fièvre associée", "dyspnée", "facteurs déclenchants"],
@@ -111,7 +169,108 @@ class AskAuraAgentWrapper:
                     "Considérer une étiologie infectieuse vs allergique",
                     "Évaluer les signes méningés si pétéchies"
                 ],
-                "red_flags": ["fièvre avec éruption", "progression rapide", "atteinte muqueuse"]
+                "red_flags": ["fièvre avec éruption", "progression rapide", "atteinte muqueuse"],
+                "differential_diagnosis": ["viral exanthem", "drug reaction", "autoimmune", "bacterial"]
+            },
+            # Mental health
+            "anxiété": {
+                "questions": ["durée", "fréquence des crises", "impact fonctionnel", "idées suicidaires", "consommation substances"],
+                "recommendations": [
+                    "Utiliser l'échelle GAD-7 pour quantifier",
+                    "Évaluer le risque suicidaire",
+                    "Explorer les comorbidités (dépression, insomnie)",
+                    "Considérer thérapie cognitivo-comportementale",
+                    "Discuter options pharmacologiques si indiqué"
+                ],
+                "red_flags": ["idées suicidaires", "automutilation", "psychose"],
+                "differential_diagnosis": ["GAD", "trouble panique", "PTSD", "TOC"]
+            },
+            "anxiety": {
+                "questions": ["duration", "panic attack frequency", "functional impact", "suicidal ideation", "substance use"],
+                "recommendations": [
+                    "Use GAD-7 scale for quantification",
+                    "Assess suicidal risk",
+                    "Explore comorbidities (depression, insomnia)",
+                    "Consider cognitive behavioral therapy",
+                    "Discuss pharmacological options if indicated"
+                ],
+                "red_flags": ["suicidal ideation", "self-harm", "psychosis"],
+                "differential_diagnosis": ["GAD", "panic disorder", "PTSD", "OCD"]
+            },
+            "dépression": {
+                "questions": ["durée des symptômes", "anhédonie", "troubles du sommeil", "idées suicidaires", "changement d'appétit"],
+                "recommendations": [
+                    "Utiliser l'échelle PHQ-9",
+                    "Évaluation du risque suicidaire obligatoire",
+                    "Explorer les facteurs déclenchants",
+                    "Discuter les options de traitement (thérapie, médication)"
+                ],
+                "red_flags": ["idées suicidaires actives", "plan suicidaire", "psychose"],
+                "differential_diagnosis": ["MDD", "trouble bipolaire", "dysthymie", "trouble d'adaptation"]
+            },
+            "depression": {
+                "questions": ["symptom duration", "anhedonia", "sleep disturbance", "suicidal ideation", "appetite changes"],
+                "recommendations": [
+                    "Use PHQ-9 scale",
+                    "Mandatory suicidal risk assessment",
+                    "Explore triggering factors",
+                    "Discuss treatment options (therapy, medication)"
+                ],
+                "red_flags": ["active suicidal ideation", "suicide plan", "psychosis"],
+                "differential_diagnosis": ["MDD", "bipolar disorder", "dysthymia", "adjustment disorder"]
+            },
+            # Diabetes
+            "diabète": {
+                "questions": ["type de diabète", "contrôle glycémique (HbA1c)", "complications", "médication actuelle", "autosurveillance"],
+                "recommendations": [
+                    "Vérifier HbA1c récente",
+                    "Dépistage des complications (néphropathie, rétinopathie, neuropathie)",
+                    "Évaluation cardiovasculaire",
+                    "Revoir les cibles glycémiques individualisées",
+                    "Éducation sur l'hypoglycémie"
+                ],
+                "red_flags": ["acidocétose", "hypoglycémie sévère", "pied diabétique infecté"],
+                "differential_diagnosis": ["Type 1", "Type 2", "LADA", "MODY"]
+            },
+            "diabetes": {
+                "questions": ["diabetes type", "glycemic control (HbA1c)", "complications", "current medication", "self-monitoring"],
+                "recommendations": [
+                    "Check recent HbA1c",
+                    "Screen for complications (nephropathy, retinopathy, neuropathy)",
+                    "Cardiovascular assessment",
+                    "Review individualized glycemic targets",
+                    "Hypoglycemia education"
+                ],
+                "red_flags": ["DKA", "severe hypoglycemia", "infected diabetic foot"],
+                "differential_diagnosis": ["Type 1", "Type 2", "LADA", "MODY"]
+            }
+        }
+
+        # Evidence-based medicine resources
+        self.ebm_resources = {
+            "fr": {
+                "guidelines": [
+                    {"name": "Collège des médecins du Québec", "url": "http://www.cmq.org/"},
+                    {"name": "INESSS - Guides de pratique", "url": "https://www.inesss.qc.ca/"},
+                    {"name": "Santé Canada - Lignes directrices", "url": "https://www.canada.ca/fr/sante-canada.html"}
+                ],
+                "databases": [
+                    {"name": "UpToDate (via institution)", "url": "https://www.uptodate.com/"},
+                    {"name": "Cochrane Library", "url": "https://www.cochranelibrary.com/"},
+                    {"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov/"}
+                ]
+            },
+            "en": {
+                "guidelines": [
+                    {"name": "CMA Practice Guidelines", "url": "https://joulecma.ca/cpg"},
+                    {"name": "NICE Guidelines", "url": "https://www.nice.org.uk/guidance"},
+                    {"name": "AHA/ACC Guidelines", "url": "https://www.acc.org/guidelines"}
+                ],
+                "databases": [
+                    {"name": "UpToDate", "url": "https://www.uptodate.com/"},
+                    {"name": "Cochrane Library", "url": "https://www.cochranelibrary.com/"},
+                    {"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov/"}
+                ]
             }
         }
         
@@ -321,10 +480,49 @@ class AskAuraAgentWrapper:
         
         return response_text, summary, suggestions, sources
 
+    def set_persona(self, persona_key):
+        """Set the medical persona for contextual responses"""
+        if persona_key in PERSONAS:
+            self.persona_key = persona_key
+
+    def _get_ebm_sources(self, keywords, language):
+        """Get relevant evidence-based medicine sources"""
+        sources = []
+        resources = self.ebm_resources.get(language, self.ebm_resources["fr"])
+
+        # Add guideline sources
+        for guideline in resources["guidelines"][:2]:
+            sources.append(f"{guideline['name']}")
+
+        # Add database sources
+        for db in resources["databases"][:2]:
+            sources.append(f"{db['name']}")
+
+        return sources
+
+    def _generate_clinical_reasoning(self, keywords, contexts_found, language):
+        """Generate clinical reasoning based on detected contexts"""
+        reasoning = []
+
+        for ctx_name in contexts_found:
+            ctx = self.medical_contexts.get(ctx_name, {})
+            if ctx.get("differential_diagnosis"):
+                if language == "fr":
+                    reasoning.append(f"Diagnostics différentiels à considérer pour {ctx_name}: {', '.join(ctx['differential_diagnosis'])}")
+                else:
+                    reasoning.append(f"Differential diagnoses to consider for {ctx_name}: {', '.join(ctx['differential_diagnosis'])}")
+
+        return reasoning
+
     def run(self, payload):
-        """Main method to process medical queries"""
+        """Main method to process medical queries with enhanced clinical reasoning"""
         try:
             transcript, question, context, language = self._parse_input(payload)
+
+            # Extract persona from payload if provided
+            if isinstance(payload, dict):
+                persona_key = payload.get("persona", "generalist")
+                self.set_persona(persona_key)
 
             # Validate input
             if not transcript and not question:
@@ -335,7 +533,8 @@ class AskAuraAgentWrapper:
                         "suggestions": ["Fournir plus de détails cliniques"],
                         "status": "need_more_context",
                         "sources": [],
-                        "language": language
+                        "language": language,
+                        "confidence": "low"
                     }
                 else:
                     return {
@@ -344,26 +543,57 @@ class AskAuraAgentWrapper:
                         "suggestions": ["Provide more clinical details"],
                         "status": "need_more_context",
                         "sources": [],
-                        "language": language
+                        "language": language,
+                        "confidence": "low"
                     }
 
             # Extract keywords
             combined_text = " ".join(filter(None, [question, context, transcript]))
             keywords = self._extract_keywords(combined_text, language)
-            
+
+            # Identify which medical contexts are relevant
+            contexts_found = [kw for kw in keywords if kw in self.medical_contexts]
+
             # Generate structured response
             response, summary, suggestions, sources = self._generate_structured_response(
                 question, transcript, context, keywords, language
             )
+
+            # Get EBM sources
+            ebm_sources = self._get_ebm_sources(keywords, language)
+            all_sources = list(set(sources + ebm_sources))
+
+            # Generate clinical reasoning
+            clinical_reasoning = self._generate_clinical_reasoning(keywords, contexts_found, language)
+
+            # Determine confidence based on context matches
+            if len(contexts_found) >= 2:
+                confidence = "high"
+            elif len(contexts_found) == 1:
+                confidence = "medium"
+            else:
+                confidence = "low"
+
+            # Get persona info
+            persona = PERSONAS.get(self.persona_key, PERSONAS["generalist"])
+            persona_name = persona["name"] if language == "fr" else persona["name_en"]
 
             return {
                 "response": response,
                 "summary": summary,
                 "suggestions": suggestions,
                 "status": "ready_for_documentation",
-                "sources": sources,
+                "sources": all_sources,
                 "language": language,
                 "keywords": keywords,
+                "clinical_reasoning": clinical_reasoning,
+                "contexts_detected": contexts_found,
+                "confidence": confidence,
+                "persona": {
+                    "key": self.persona_key,
+                    "name": persona_name,
+                    "expertise": persona.get("expertise", [])
+                },
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -371,11 +601,12 @@ class AskAuraAgentWrapper:
             error_msg = f"Error processing request: {str(e)}"
             return {
                 "response": error_msg,
-                "summary": "Erreur de traitement",
+                "summary": "Erreur de traitement" if "fr" in str(payload) else "Processing error",
                 "suggestions": ["Veuillez réessayer avec une formulation différente"],
                 "status": "error",
                 "sources": [],
                 "language": "fr",
+                "confidence": "low",
                 "error": str(e)
             }
 

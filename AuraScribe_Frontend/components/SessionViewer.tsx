@@ -10,6 +10,10 @@ import {
 
   Download,
 
+  Upload,
+
+  Send,
+
   Stethoscope,
 
   CheckCircle,
@@ -37,6 +41,7 @@ import {
 import { Session, Language, FormStatus } from '../types';
 
 import { TRANSLATIONS } from '../constants';
+import { downloadSessionPDF, pushSessionToEMR, sendSessionViaEFax } from '../services/backendApi';
 
 
 
@@ -73,6 +78,16 @@ const SessionViewer: React.FC<SessionViewerProps> = ({ session, lang, branding, 
   const [hasReviewed, setHasReviewed] = useState(false);
 
   const [showMADO, setShowMADO] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const actionLoadingLabel = actionLoading === 'download'
+    ? 'Téléchargement...'
+    : actionLoading === 'emr'
+      ? 'Transmission à l’EMR...'
+      : actionLoading === 'fax'
+        ? 'Envoi fax...'
+        : null;
 
 
 
@@ -238,6 +253,134 @@ const SessionViewer: React.FC<SessionViewerProps> = ({ session, lang, branding, 
 
 
 
+  const handleDownload = async () => {
+
+    setActionLoading('download');
+
+    setActionError(null);
+
+    setActionMessage(null);
+
+    try {
+
+      const blob = await downloadSessionPDF(session.id);
+
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+
+      a.href = url;
+
+      a.download = `session_${session.id}.pdf`;
+
+      document.body.appendChild(a);
+
+      a.click();
+
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+
+      setActionMessage('PDF téléchargé localement.');
+
+    } catch (err: any) {
+
+      setActionError(err?.message || 'Erreur lors du téléchargement du PDF');
+
+    } finally {
+
+      setActionLoading(null);
+
+    }
+
+  };
+
+
+
+  const handleCopyToClipboard = () => {
+
+    const contentToCopy = editedContent || session.transcript || '';
+
+    if (!contentToCopy) {
+
+      setActionError('Aucun contenu prêt pour la copie.');
+
+      return;
+
+    }
+
+    setActionError(null);
+
+    setActionMessage(null);
+
+    void navigator.clipboard.writeText(contentToCopy);
+
+    setActionMessage('Note copiée dans le presse-papiers.');
+
+  };
+
+
+
+  const handlePushToEMR = async () => {
+
+    setActionLoading('emr');
+
+    setActionError(null);
+
+    setActionMessage(null);
+
+    try {
+
+      await pushSessionToEMR(session.id, session.patientInfo.ramq);
+
+      setActionMessage('Document transmis à l’EMR.');
+
+    } catch (err: any) {
+
+      setActionError(err?.message || 'Échec de la transmission à l’EMR');
+
+    } finally {
+
+      setActionLoading(null);
+
+    }
+
+  };
+
+
+
+  const handleSendViaFax = async () => {
+
+    const faxNumber = prompt('Numéro de fax destinataire :');
+
+    if (!faxNumber) return;
+
+    setActionLoading('fax');
+
+    setActionError(null);
+
+    setActionMessage(null);
+
+    try {
+
+      await sendSessionViaEFax(session.id, faxNumber);
+
+      setActionMessage(`eFax envoyé à ${faxNumber}.`);
+
+    } catch (err: any) {
+
+      setActionError(err?.message || 'Envoi fax échoué');
+
+    } finally {
+
+      setActionLoading(null);
+
+    }
+
+  };
+
+
+
   const renderPrintableForm = () => (
 
     <div className="hidden print:block print-container p-12 bg-white text-black font-serif">
@@ -306,7 +449,7 @@ const SessionViewer: React.FC<SessionViewerProps> = ({ session, lang, branding, 
 
   return (
 
-    <div className="w-full h-full flex flex-col gap-6 animate-in fade-in duration-500 pb-20">
+    <div className="w-full flex flex-col gap-6 animate-in fade-in duration-500 pb-20">
 
       {renderPrintableForm()}
 
@@ -552,7 +695,7 @@ const SessionViewer: React.FC<SessionViewerProps> = ({ session, lang, branding, 
 
                 <div className="flex flex-wrap items-center justify-between gap-4">
 
-                  <div className="flex gap-3">
+                  <div className="flex flex-wrap gap-3">
 
                     <button onClick={handlePrint} className="flex items-center gap-2 px-6 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-slate-200 transition-all">
 
@@ -560,9 +703,27 @@ const SessionViewer: React.FC<SessionViewerProps> = ({ session, lang, branding, 
 
                     </button>
 
-                    <button className="flex items-center gap-2 px-6 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-slate-200 transition-all">
+                    <button onClick={handleDownload} disabled={actionLoading === 'download'} className="flex items-center gap-2 px-6 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-slate-200 transition-all disabled:cursor-wait disabled:opacity-60">
 
-                      <Copy size={16} /> Copy to EMR
+                      <Download size={16} /> Download
+
+                    </button>
+
+                    <button onClick={handleCopyToClipboard} className="flex items-center gap-2 px-6 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-slate-200 transition-all">
+
+                      <Copy size={16} /> Copy Note
+
+                    </button>
+
+                    <button onClick={handlePushToEMR} disabled={actionLoading === 'emr'} className="flex items-center gap-2 px-6 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-slate-200 transition-all disabled:cursor-wait disabled:opacity-60">
+
+                      <Upload size={16} /> Push to EMR
+
+                    </button>
+
+                    <button onClick={handleSendViaFax} disabled={actionLoading === 'fax'} className="flex items-center gap-2 px-6 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-transparent text-slate-600 dark:text-slate-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-slate-200 transition-all disabled:cursor-wait disabled:opacity-60">
+
+                      <Send size={16} /> Send via Fax
 
                     </button>
 
@@ -587,6 +748,16 @@ const SessionViewer: React.FC<SessionViewerProps> = ({ session, lang, branding, 
                   )}
 
                 </div>
+
+                {(actionError || actionMessage || actionLoadingLabel) && (
+
+                  <p className={`text-[10px] uppercase tracking-[0.2em] ${actionError ? 'text-rose-500' : 'text-slate-500'} mt-2`}>
+
+                    {actionError || actionMessage || actionLoadingLabel}
+
+                  </p>
+
+                )}
 
               </div>
 

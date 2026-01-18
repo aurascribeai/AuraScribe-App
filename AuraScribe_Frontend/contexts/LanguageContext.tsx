@@ -1,12 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { translations } from '../translations';
-
-type Language = 'fr' | 'en';
+import { TRANSLATIONS } from '../constants';
+import { Language } from '../types';
 
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: typeof translations.fr;
+  t: (key: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -28,16 +27,27 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
   // Persist language preference to localStorage
   useEffect(() => {
     localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    // Update document lang attribute for accessibility
+    document.documentElement.lang = language;
   }, [language]);
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
   };
 
+  // Translation function that returns the translated string or the key if not found
+  const t = (key: string): string => {
+    const translation = TRANSLATIONS[key];
+    if (translation) {
+      return translation[language] || key;
+    }
+    return key;
+  };
+
   const value = {
     language,
     setLanguage,
-    t: translations[language],
+    t,
   };
 
   return (

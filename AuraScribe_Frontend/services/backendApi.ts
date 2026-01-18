@@ -285,4 +285,58 @@ export async function uploadClinicalFile(file: File) {
     return res.json();
 }
 
+// ========== AURALINK ENDPOINTS ==========
+
+// Create a new AuraLink secure transfer
+export async function createAuraLinkTransfer(data: {
+    file_url: string;
+    file_name: string;
+    file_type?: string;
+    file_size?: string;
+    recipient_email: string;
+    permissions?: {
+        read?: boolean;
+        download?: boolean;
+        edit?: boolean;
+    };
+    security_method?: 'token' | 'password';
+    password?: string;
+    anti_capture?: boolean;
+    expiry?: string;
+}) {
+    const res = await fetch(`${API_BASE_URL}/api/auralink/transfers`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(data)
+    });
+    return res.json();
+}
+
+// List all AuraLink transfers
+export async function listAuraLinkTransfers(limit: number = 50) {
+    const res = await fetch(`${API_BASE_URL}/api/auralink/transfers?limit=${limit}`, {
+        headers: getAuthHeaders()
+    });
+    return res.json();
+}
+
+// Delete/revoke an AuraLink transfer
+export async function deleteAuraLinkTransfer(transferId: string) {
+    const res = await fetch(`${API_BASE_URL}/api/auralink/transfers/${transferId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+    });
+    return res.json();
+}
+
+// Access an AuraLink file (public endpoint, no auth required)
+export async function accessAuraLinkFile(transferId: string, token?: string, password?: string) {
+    const params = new URLSearchParams();
+    if (token) params.append('token', token);
+    if (password) params.append('password', password);
+
+    const res = await fetch(`${API_BASE_URL}/api/auralink/access/${transferId}?${params.toString()}`);
+    return res.json();
+}
+
 // TODO: Add authentication, task, billing, template, and notification endpoints as backend expands

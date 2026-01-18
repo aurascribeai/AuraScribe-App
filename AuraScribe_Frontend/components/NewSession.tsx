@@ -51,12 +51,15 @@ interface NewSessionProps {
 }
 
 const DEFAULT_WS_URL = 'http://localhost:5000';
+const DRAFT_STORAGE_KEY = 'aurascribe:new-session-draft';
 
 const NewSession: React.FC<NewSessionProps> = ({ lang, onComplete, onError, clinician }) => {
   // ============ ALL STATE DECLARATIONS FIRST ============
   const [step, setStep] = useState<'consent' | 'info' | 'recording' | 'processing'>('consent');
   const [consent, setConsent] = useState({ taken: false, decree: false });
   const [modelPref, setModelPref] = useState<string>(lang === 'en' ? 'medical' : 'nova-3');
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [patientInfo, setPatientInfo] = useState<PatientInfo>({
     fullName: '',
@@ -141,6 +144,41 @@ const NewSession: React.FC<NewSessionProps> = ({ lang, onComplete, onError, clin
     setIsMicActive((active) => !active);
   };
 
+  const handleAudioUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const isAudioType = file.type.startsWith('audio');
+    const hasAudioExtension = /\.(mp3|wav|m4a|ogg|webm)$/i.test(file.name);
+    if (!isAudioType && !hasAudioExtension) {
+      setUploadError('Format audio non supporté. Choisissez un MP3, WAV, M4A, OGG ou WEBM.');
+      event.target.value = '';
+      return;
+    }
+
+    setUploadError(null);
+    setRecordedAudio(file);
+    setAudioMimeType(file.type || 'audio/webm');
+    setRecordedChunks([]);
+    setRecordedTranscript('');
+    setIsRecording(false);
+    setIsPaused(false);
+    setTimer(0);
+    setWaveforms(Array(40).fill(10));
+    setBackendStatus(`Fichier chargé : ${file.name}`);
+    setStep('recording');
+    setUploadedFileName(file.name);
+    event.target.value = '';
+  };
+
+  const clearUploadedAudio = () => {
+    setRecordedAudio(null);
+    setUploadedFileName(null);
+    setUploadError(null);
+    setBackendStatus('');
+  };
+
   const availableForms = [
     "Note d'absence (École/Travail)",
     "Formulaire CNESST",
@@ -148,6 +186,31 @@ const NewSession: React.FC<NewSessionProps> = ({ lang, onComplete, onError, clin
     "Consentement Chirurgical",
     "Demande de consultation"
   ];
+
+  const SPECIALTY_PERSONAS: Record<string, { name: string; context: string }> = {
+    'family': {
+      name: 'Médecine de Famille',
+      context: 'You are a family medicine doctor. Focus on holistic care, preventive medicine, and chronic disease management.'
+    },
+    'cardiology': {
+      name: 'Cardiologie',
+      context: 'You are a cardiologist. Focus on heart health, cardiovascular diagnostics, and treatment.'
+    },
+    'psychiatry': {
+      name: 'Psychiatrie',
+      context: 'You are a psychiatrist. Focus on mental health, psychiatric evaluation, and therapy.'
+    },
+    'pediatrics': {
+      name: 'Pédiatrie',
+      context: 'You are a pediatrician. Focus on child health, growth, and development.'
+    },
+    'geriatrics': {
+      name: 'Gériatrie',
+      context: 'You are a geriatrician. Focus on elderly care, frailty, and age-related conditions.'
+    },
+  };
+
+  const [selectedSpecialty, setSelectedSpecialty] = useState<string>('family');
 
   const toggleForm = (form: string) => {
     setSelectedForms(prev => prev.includes(form) ? prev.filter(f => f !== form) : [...prev, form]);
@@ -210,7 +273,7 @@ const NewSession: React.FC<NewSessionProps> = ({ lang, onComplete, onError, clin
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [showScanner]);
+  }, [showScanner, onError]);
 
   const captureAndScan = async () => {
     if (!visionAgent.current.isEnabled) {
@@ -275,6 +338,46 @@ const NewSession: React.FC<NewSessionProps> = ({ lang, onComplete, onError, clin
     }
     mediaRecorderRef.current = null;
   };
+
+  useEffect(() => {
+    try {
+      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!savedDraft) return;
+      const parsed = JSON.parse(savedDraft);
+      if (parsed.patientInfo) {
+        setPatientInfo(prev => ({ ...prev, ...parsed.patientInfo }));
+      }
+      if (Array.isArray(parsed.selectedForms)) {
+        setSelectedForms(parsed.selectedForms);
+      }
+      if (typeof parsed.customFormRequest === 'string') {
+        setCustomFormRequest(parsed.customFormRequest);
+      }
+      if (typeof parsed.modelPref === 'string') {
+        setModelPref(parsed.modelPref);
+      }
+      if (typeof parsed.selectedSpecialty === 'string') {
+        setSelectedSpecialty(parsed.selectedSpecialty);
+      }
+      if (parsed.consent && typeof parsed.consent === 'object') {
+        setConsent(prev => ({ ...prev, ...parsed.consent }));
+      }
+    } catch (err) {
+      console.warn('Failed to restore session draft:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    const draft = {
+      patientInfo,
+      selectedForms,
+      customFormRequest,
+      modelPref,
+      selectedSpecialty,
+      consent
+    };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }, [patientInfo, selectedForms, customFormRequest, modelPref, selectedSpecialty, consent]);
 
   const normalizeGeneratedForms = (payload: any) => {
     if (!payload) return {};
@@ -612,6 +715,7 @@ ${fallbackTranscript}
     } finally {
       setIsGenerating(false);
       setBackendStatus('');
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
     }
   }; const formatTime = (s: number) => {
     const mins = Math.floor(s / 60);
@@ -731,32 +835,6 @@ ${fallbackTranscript}
       setActionLoading(null);
     }
   };
-
-  const SPECIALTY_PERSONAS: Record<string, { name: string; context: string }> = {
-    'family': {
-      name: 'Médecine de Famille',
-      context: 'You are a family medicine doctor. Focus on holistic care, preventive medicine, and chronic disease management.'
-    },
-    'cardiology': {
-      name: 'Cardiologie',
-      context: 'You are a cardiologist. Focus on heart health, cardiovascular diagnostics, and treatment.'
-    },
-    'psychiatry': {
-      name: 'Psychiatrie',
-      context: 'You are a psychiatrist. Focus on mental health, psychiatric evaluation, and therapy.'
-    },
-    'pediatrics': {
-      name: 'Pédiatrie',
-      context: 'You are a pediatrician. Focus on child health, growth, and development.'
-    },
-    'geriatrics': {
-      name: 'Gériatrie',
-      context: 'You are a geriatrician. Focus on elderly care, frailty, and age-related conditions.'
-    },
-    // Add more specialties as needed
-  };
-
-  const [selectedSpecialty, setSelectedSpecialty] = useState<string>('family');
 
   return (
     <div className="w-full min-h-screen flex flex-col items-center justify-center px-2 py-8 animate-in fade-in duration-500">
@@ -1004,6 +1082,34 @@ ${fallbackTranscript}
             </div>
           </div>
 
+          <div className="space-y-3 mt-4">
+            <div className="flex items-center gap-2">
+              <Upload className="text-blue-600" size={18} />
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Enregistrement existant</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex items-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-200 cursor-pointer transition-all hover:border-blue-400 hover:text-blue-600">
+                <input
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={handleAudioUpload}
+                />
+                <Upload size={16} />
+                <span>Charger un fichier audio</span>
+              </label>
+              {uploadedFileName && (
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[240px]">
+                  {uploadedFileName}
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">Formats acceptés : MP3, WAV, M4A, OGG, WEBM. Le fichier remplace l'enregistrement direct.</p>
+            {uploadError && (
+              <p className="text-[10px] text-red-500">{uploadError}</p>
+            )}
+          </div>
+
           {/* Info Banner */}
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-4">
             <div className="flex items-start gap-3">
@@ -1022,7 +1128,7 @@ ${fallbackTranscript}
             disabled={!patientInfo.fullName}
             onClick={() => {
               if (validatePatientInfo()) {
-                handleStart();
+                void handleStart();
               }
             }}
             className="w-full py-5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-3xl font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-blue-500/20 transition-all flex items-center justify-center gap-4 active:scale-[0.98]"
@@ -1047,6 +1153,19 @@ ${fallbackTranscript}
               </>
             )}
           </div>
+
+          {uploadedFileName && (
+            <div className="w-full max-w-4xl px-6 py-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 flex items-center justify-between gap-3">
+              <span className="truncate">Fichier prêt : {uploadedFileName}</span>
+              <button
+                type="button"
+                onClick={clearUploadedAudio}
+                className="text-amber-600 font-black uppercase tracking-[0.2em] text-[10px] hover:underline"
+              >
+                Supprimer
+              </button>
+            </div>
+          )}
 
           <div className="text-6xl font-black text-slate-800 dark:text-white heading-font tabular-nums tracking-tighter">
             {formatTime(timer)}
