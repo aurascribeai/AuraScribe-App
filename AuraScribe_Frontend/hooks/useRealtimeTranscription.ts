@@ -44,9 +44,18 @@ export function useRealtimeTranscription(options: UseRealtimeTranscriptionOption
 
     // Connect to backend WebSocket using env var
     const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-    const socket = io(backendUrl, {
+    const wsUrl = import.meta.env.VITE_WS_URL || backendUrl;
+
+    console.log('Connecting to WebSocket:', wsUrl);
+
+    const socket = io(wsUrl, {
       path: '/socket.io',
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 10000
     });
 
     socket.on('connect', () => {
@@ -107,6 +116,20 @@ export function useRealtimeTranscription(options: UseRealtimeTranscriptionOption
       setState(prev => ({ ...prev, error: 'Failed to connect to server', isConnected: false }));
     });
 
+    socket.on('reconnect', (attemptNumber) => {
+      console.log('WebSocket reconnected after', attemptNumber, 'attempts');
+      setState(prev => ({ ...prev, isConnected: true, error: null }));
+      // Restart recording if it was active before disconnection
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        socket.emit('start_recording', { language, model });
+      }
+    });
+
+    socket.on('reconnect_error', (error) => {
+      console.error('WebSocket reconnection failed:', error);
+      setState(prev => ({ ...prev, error: 'Reconnection failed' }));
+    });
+
     socketRef.current = socket;
   }, [onTranscriptUpdate, onError]);
 
@@ -161,8 +184,8 @@ export function useRealtimeTranscription(options: UseRealtimeTranscriptionOption
         }
       };
 
-      // Start recording with timeslice (send chunks every 500ms)
-      mediaRecorder.start(500);
+      // Start recording with timeslice (send chunks every 250ms for better real-time performance)
+      mediaRecorder.start(250);
 
       setState(prev => ({
         ...prev,

@@ -241,14 +241,14 @@ const NewSession: React.FC<NewSessionProps> = ({ lang, onComplete, onError, clin
     if (isRecording && realtimeTranscript) {
       setRecordedTranscript(realtimeTranscript);
     }
-  }, [realtimeTranscript, isRecording]);
+  }, [realtimeTranscript, isRecording, realtimeTranscriptObj.isFinal]);
 
-  // Auto-scroll to show latest transcript
+  // Auto-scroll to show latest transcript with smoother animation
   useEffect(() => {
-    if (transcriptEndRef.current && recordedTranscript) {
+    if (transcriptEndRef.current && (recordedTranscript || realtimeTranscript)) {
       transcriptEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
-  }, [recordedTranscript]);
+  }, [recordedTranscript, realtimeTranscript]);
 
   // Scanner Logic
   useEffect(() => {
@@ -938,7 +938,7 @@ ${fallbackTranscript}
           <div className="space-y-6">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30">
-                    <UserIcon size={18} className="text-blue-600 dark:text-blue-400" />
+                <UserIcon size={18} className="text-blue-600 dark:text-blue-400" />
               </div>
               <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Informations Patient</span>
             </div>

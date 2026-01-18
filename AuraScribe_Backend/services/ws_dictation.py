@@ -215,7 +215,8 @@ def handle_audio_chunk(data):
             session_data['audio_chunks'].append(audio_bytes.hex())  # Store as hex string for JSON
             
             chunk_count = len(session_data['audio_chunks'])
-            should_transcribe = is_final or (chunk_count % 5 == 0 and chunk_count > 0)
+            # Process more frequently for better real-time performance (every 2-3 chunks)
+            should_transcribe = is_final or (chunk_count % 3 == 0 and chunk_count > 0)
             
             if should_transcribe and deepgram_service:
                 # Combine all audio chunks
@@ -248,7 +249,7 @@ def handle_audio_chunk(data):
                             'speaker_segments': result.get('speaker_segments', [])
                         })
                         
-                        logger.debug(f"WebSocket: Transcribed {len(transcript)} chars for {sid}")
+                        logger.debug(f"WebSocket: Transcribed {len(transcript)} chars for {sid}, confidence: {result.get('confidence', 0)}")
                     else:
                         # Fallback to previous transcript if available
                         if session_data['transcript_buffer']:
