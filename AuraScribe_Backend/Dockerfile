@@ -21,5 +21,5 @@ USER aurascribe
 
 EXPOSE 5000
 
-CMD ["gunicorn", "-k", "eventlet", "-w", "1", "main:socketio", "-b", "0.0.0.0:5000"]
+CMD ["gunicorn", "-k", "eventlet", "-w", "1", "--timeout", "120", "main:app", "-b", "0.0.0.0:5000"]
 
