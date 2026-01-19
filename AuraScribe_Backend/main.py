@@ -45,7 +45,10 @@ if os.path.exists(services_path):
     sys.path.append(services_path)
 
 # Create Flask app
-app = Flask(__name__)\n\n# Configure file uploads (100MB limit for audio files)\napp.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
+app = Flask(__name__)
+
+# Configure file uploads (100MB limit for audio files)
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
