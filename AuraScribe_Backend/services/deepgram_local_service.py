@@ -21,22 +21,26 @@ class DeepgramLocalService:
         self.base_url = os.getenv('DEEPGRAM_SELF_HOSTED_URL', 'http://172.17.0.1:8080').rstrip('/')
         self.api_key = os.getenv('DEEPGRAM_API_KEY', '1e7b06318100c48315a6e638b18e86b54263a4a1')
         
-        # Model configurations - UPDATED WITH CORRECT MODEL NAMES FOR YOUR SERVER
-        # Based on server logs showing: general-nova-3, 2-general-nova
+        # Model configurations - FORCE ALL TO general-nova-3 for compatibility
+        # Based on server logs showing: general-nova-3 works reliably
         self.models = {
             'en': 'general-nova-3',
             'fr': 'general-nova-3', 
+            'es': 'general-nova-3',
             'default': 'general-nova-3'
         }
         
-        # Model aliases - map common names to actual server model names
+        # Model aliases - ALL map to general-nova-3 for compatibility
         self.model_aliases = {
             'nova-3': 'general-nova-3',
-            'nova-2': '2-general-nova', 
+            'nova-2': 'general-nova-3', 
             'general': 'general-nova-3',
-            '2-general': '2-general-nova',
-            'medical': 'general-nova-3',  # Fallback to general if medical not available
-            'nova-2-medical': 'general-nova-3'
+            '2-general': 'general-nova-3',
+            'general-nova': 'general-nova-3',
+            'medical': 'general-nova-3',
+            'nova-2-medical': 'general-nova-3',
+            'enhanced': 'general-nova-3',
+            'base': 'general-nova-3'
         }
         
         # Default settings
