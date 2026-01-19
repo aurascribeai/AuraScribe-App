@@ -17,8 +17,8 @@ class DeepgramLocalService:
         """
         Initialize with your specific Deepgram configuration
         """
-        # Your Deepgram self-hosted instance
-        self.base_url = os.getenv('DEEPGRAM_SELF_HOSTED_URL', 'http://34.19.193.244:8080').rstrip('/')
+        # Your Deepgram self-hosted instance - use internal Docker network address
+        self.base_url = os.getenv('DEEPGRAM_SELF_HOSTED_URL', 'http://172.17.0.1:8080').rstrip('/')
         self.api_key = os.getenv('DEEPGRAM_API_KEY', '1e7b06318100c48315a6e638b18e86b54263a4a1')
         
         # Model configurations - UPDATED WITH CORRECT MODEL NAMES FOR YOUR SERVER
@@ -156,13 +156,10 @@ class DeepgramLocalService:
         diarize = kwargs.get('diarize', True)
         detect_language = kwargs.get('detect_language', False)
 
-        # Build parameters for the API call
+        # Build parameters for the API call - simplified for self-hosted
         params = {
             'model': safe_model,
-            'smart_format': str(smart_format).lower(),
             'punctuate': str(punctuate).lower(),
-            'utterances': str(utterances).lower(),
-            'diarize': str(diarize).lower(),
             'detect_language': 'false'  # Disable auto-detect for reliability
         }
         
