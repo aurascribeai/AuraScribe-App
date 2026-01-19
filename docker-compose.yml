@@ -62,7 +62,7 @@ services:
       dockerfile: Dockerfile
       args:
         # IMPORTANT: Use your public API URL, not internal Docker hostname
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.aurascribe.ca}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://34.19.193.244:5000}
         VITE_API_KEY: ${VITE_API_KEY:-}
     image: aurascribe-frontend:latest
     restart: unless-stopped

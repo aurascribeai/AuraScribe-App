@@ -43,7 +43,7 @@ export function useRealtimeTranscription(options: UseRealtimeTranscriptionOption
     if (socketRef.current?.connected) return;
 
     // Connect to backend WebSocket using env var
-    const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+    const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://34.19.193.244:5000';
     const wsUrl = import.meta.env.VITE_WS_URL || backendUrl;
 
     console.log('Connecting to WebSocket:', wsUrl);
