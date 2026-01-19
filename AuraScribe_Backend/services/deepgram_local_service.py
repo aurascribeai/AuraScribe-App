@@ -43,10 +43,9 @@ class DeepgramLocalService:
         self.default_language = os.getenv('DEEPGRAM_DEFAULT_LANGUAGE', 'fr-CA')
         self.smart_format = os.getenv('DEEPGRAM_SMART_FORMAT', 'true').lower() == 'true'
         
-        # Headers
+        # Headers - try without API key for self-hosted instance
         self.headers = {
-            'Content-Type': 'application/octet-stream',
-            'Authorization': f'Token {self.api_key}'
+            'Content-Type': 'application/octet-stream'
         }
         
         logger.info(f"Initializing Deepgram self-hosted at: {self.base_url}")
