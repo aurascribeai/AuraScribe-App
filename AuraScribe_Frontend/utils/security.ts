@@ -215,7 +215,7 @@ export const CSP_DIRECTIVES = {
   'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
   'font-src': ["'self'", 'https://fonts.gstatic.com'],
   'img-src': ["'self'", 'data:', 'https:'],
-  'connect-src': ["'self'", 'http://localhost:3001', 'http://34.19.193.244:8080'],
+  'connect-src': ["'self'", 'https://api.aurascribe.ca', 'wss://api.aurascribe.ca'],
   'frame-ancestors': ["'none'"],
   'base-uri': ["'self'"],
   'form-action': ["'self'"],

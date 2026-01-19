@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   const isProduction = mode === 'production';
   const appUrl = env.VITE_APP_URL || env.APP_URL || 'http://localhost:3000';
-  const apiBaseUrl = env.VITE_API_BASE_URL || env.API_BASE_URL || 'http://34.19.193.244:5000';
+  const apiBaseUrl = env.VITE_API_BASE_URL || env.API_BASE_URL || 'https://api.aurascribe.ca';
 
   return {
     server: {
@@ -21,9 +21,9 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '/api': {
-          target: 'http://34.19.193.244:5000',
+          target: 'https://api.aurascribe.ca',
           changeOrigin: true,
-          secure: false
+          secure: true
         }
       },
     },

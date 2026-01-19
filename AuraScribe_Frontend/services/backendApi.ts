@@ -1,7 +1,7 @@
 // AuraScribe Frontend API Service
 // Connects React components to backend Flask endpoints
 
-const DEFAULT_API_BASE_URL = 'http://34.19.193.244:5000';
+const DEFAULT_API_BASE_URL = 'https://api.aurascribe.ca';
 
 // Use the env var so Docker or Vite can point to the backend (leave blank for proxy)
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
