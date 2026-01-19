@@ -113,18 +113,19 @@ class DeepgramLocalService:
     
     def get_safe_language_model_combo(self, language: str, model: str) -> Tuple[str, str]:
         """Get a safe language/model combination that works on your server"""
-        
+
         # Map model to available models
         actual_model = self.get_model_for_language(language, model)
-        
-        # Simplify language codes to most supported versions
-        if language.startswith('fr'):
-            safe_language = 'fr-CA'
-        elif language.startswith('en'):
-            safe_language = 'en-US'
+
+        # Simplify language codes to most supported versions (lowercase for Deepgram)
+        language_lower = language.lower()
+        if language_lower.startswith('fr'):
+            safe_language = 'fr-ca'
+        elif language_lower.startswith('en'):
+            safe_language = 'en-us'
         else:
-            safe_language = 'fr-CA'  # Default fallback
-        
+            safe_language = 'fr-ca'  # Default fallback
+
         return safe_language, actual_model
     
     def transcribe_audio_file(self, audio_file_path: str, **kwargs) -> Dict[str, Any]:
@@ -211,11 +212,11 @@ class DeepgramLocalService:
         if result.get('success'):
             return result
         
-        # If that failed, try some fallback combinations
+        # If that failed, try some fallback combinations (lowercase for Deepgram)
         fallback_combinations = [
-            {'model': 'general-nova-3', 'language': 'fr-CA'},
-            {'model': 'general-nova-3', 'language': 'en-US'},
-            {'model': '2-general-nova', 'language': 'fr-CA'},
+            {'model': 'general-nova-3', 'language': 'fr-ca'},
+            {'model': 'general-nova-3', 'language': 'en-us'},
+            {'model': '2-general-nova', 'language': 'fr-ca'},
         ]
         
         for fallback in fallback_combinations:
