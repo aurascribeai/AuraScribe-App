@@ -494,14 +494,22 @@ def transcribe():
                 compliance = agent_results.get('ComplianceMonitorAgent', {})
                 ramq_billing = agent_results.get('RAMQ_BillingAgent', {})
 
+                # Get the formatted SOAP content
+                soap_note = clinical_doc.get('soap_note', {})
+                formatted_soap = clinical_doc.get('formatted_content', '')
+
+                # Add formatted_content to soap_note for frontend compatibility
+                soap_with_format = {**soap_note, 'formatted_content': formatted_soap}
+
                 generated_forms = {
-                    'soap': clinical_doc.get('soap_note', {}),
+                    'soap': soap_with_format,
                     'patientNote': clinical_doc.get('patient_explanation', {}),
                     'clinicalData': {
-                        'soap': clinical_doc.get('soap_note', {}),
-                        'soapNote': clinical_doc.get('soap_note', {}),
+                        'soap': soap_with_format,
+                        'soapNote': soap_with_format,
                         'patientInstruction': clinical_doc.get('patient_explanation', {}),
-                        'clinicalReasoning': clinical_doc.get('clinical_reasoning', '')
+                        'clinicalReasoning': clinical_doc.get('clinical_reasoning', ''),
+                        'formatted_content': formatted_soap
                     },
                     'prescription': prescription_lab.get('prescription', {}),
                     'labOrder': prescription_lab.get('lab_order', {}),
