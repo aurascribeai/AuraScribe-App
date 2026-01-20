@@ -1,6 +1,10 @@
 from agents.medical_persona_system import MedicalPersona
 import concurrent.futures
 import time
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class Orchestrator:
     """Enhanced orchestrator with parallel execution and confidence scoring"""
@@ -188,11 +192,6 @@ class Orchestrator:
             return "low"
 # AuraScribe Orchestrator - Coordinates all agents for medical documentation
 # Note: google.adk is not available, using local wrapper implementations
-
-from datetime import datetime
-import logging
-
-logger = logging.getLogger(__name__)
 
 # Import agent wrappers (they don't need google.adk anymore)
 try:

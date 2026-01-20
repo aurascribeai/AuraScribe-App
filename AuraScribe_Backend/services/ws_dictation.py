@@ -279,7 +279,7 @@ def handle_audio_chunk(data):
 
 
 @socketio.on('stop_recording')
-def handle_stop_recording(data):
+def handle_stop_recording(data=None):
     """Handle stop recording with proper signature."""
     try:
         sid = request.sid
@@ -340,7 +340,7 @@ def handle_stop_recording(data):
 
 
 @socketio.on('get_status')
-def handle_get_status(data):
+def handle_get_status(data=None):
     """Handle get status with proper signature."""
     try:
         sid = request.sid

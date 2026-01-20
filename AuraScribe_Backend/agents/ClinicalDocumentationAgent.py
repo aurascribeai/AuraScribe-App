@@ -7,19 +7,23 @@ import re
 PERSONAS = {
     "generalist": {
         "name": "General Doctor",
-        "focus": "Everything - general care"
+        "focus": "Everything - general care",
+        "approach": "Comprehensive evaluation with holistic patient assessment"
     },
     "cardiologist": {
         "name": "Heart Specialist",
-        "focus": "Heart and blood pressure"
+        "focus": "Heart and blood pressure",
+        "approach": "Cardiovascular-focused evaluation with cardiac risk assessment"
     },
     "pulmonologist": {
-        "name": "Lung Specialist", 
-        "focus": "Lungs and breathing"
+        "name": "Lung Specialist",
+        "focus": "Lungs and breathing",
+        "approach": "Respiratory-focused evaluation with pulmonary function assessment"
     },
     "neurologist": {
         "name": "Brain Specialist",
-        "focus": "Brain and nerves"
+        "focus": "Brain and nerves",
+        "approach": "Neurological-focused evaluation with cognitive and motor assessment"
     }
 }
 
@@ -280,8 +284,11 @@ class ClinicalDocumentationAgentWrapper:
             parts.append("    Further clinical correlation needed.")
         
         # Persona-specific assessment
-        if self.persona:
+        if self.persona and hasattr(self.persona, 'adapt_assessment'):
             parts.append(self.persona.adapt_assessment(transcript, ""))
+        elif self.persona and hasattr(self.persona, 'persona_data'):
+            parts.append(f"\n  {self.persona.persona_data['name'].upper()} PERSPECTIVE:")
+            parts.append(f"    Consider {self.persona.persona_data['approach']}")
         
         return '\n'.join(parts)
     
@@ -306,8 +313,11 @@ class ClinicalDocumentationAgentWrapper:
         parts.append("    - Document in medical record")
         
         # Persona-specific plan
-        if self.persona:
+        if self.persona and hasattr(self.persona, 'adapt_plan'):
             parts.append("\n" + self.persona.adapt_plan(transcript, ""))
+        elif self.persona and hasattr(self.persona, 'persona_data'):
+            parts.append(f"\n  {self.persona.persona_data['name'].upper()} RECOMMENDATIONS:")
+            parts.append(f"    Follow {self.persona.persona_data['approach']}")
         
         return '\n'.join(parts)
     
@@ -357,8 +367,9 @@ class ClinicalDocumentationAgentWrapper:
             reasoning.append("2. Symptoms suggest involvement of multiple physiological systems.")
             reasoning.append("3. Differential diagnosis should consider common conditions first.")
         
-        if self.persona:
-            reasoning.append(f"4. From {self.persona.persona_data['name']} perspective: Focus on {self.persona.persona_data['approach']}")
+        if self.persona and hasattr(self.persona, 'persona_data'):
+            approach = self.persona.persona_data.get('approach', self.persona.persona_data.get('focus', 'comprehensive care'))
+            reasoning.append(f"4. From {self.persona.persona_data['name']} perspective: Focus on {approach}")
         
         return '\n'.join(reasoning)
     
