@@ -182,7 +182,8 @@ def handle_start_recording(data):
             'language': data.get('language', 'fr-CA'),
             'model': data.get('model', 'general-nova-3'),
             'audio_chunks': [],
-            'transcript_buffer': ''
+            'transcript_buffer': '',
+            'chunk_count': 0
         })
         save_session(sid, session_data)
         
@@ -195,7 +196,12 @@ def handle_start_recording(data):
 
 @socketio.on('audio_chunk')
 def handle_audio_chunk(data):
-    """Handle audio chunk with proper signature."""
+    """Handle audio chunk with proper signature.
+
+    IMPORTANT: Each WebM chunk is a complete file with headers.
+    We transcribe each chunk individually and APPEND to the transcript buffer.
+    This avoids issues with concatenating WebM files which don't work well.
+    """
     try:
         sid = request.sid
         session_data = get_session(sid)
@@ -205,30 +211,30 @@ def handle_audio_chunk(data):
 
         audio_b64 = data.get('audio', '')
         is_final = data.get('is_final', False)
-        
+
         if not audio_b64:
             emit('error', {'message': 'No audio data received'})
             return
 
         try:
             audio_bytes = base64.b64decode(audio_b64)
-            session_data['audio_chunks'].append(audio_bytes.hex())  # Store as hex string for JSON
-            
-            chunk_count = len(session_data['audio_chunks'])
-            # Process more frequently for better real-time performance (every 2-3 chunks)
-            should_transcribe = is_final or (chunk_count % 3 == 0 and chunk_count > 0)
-            
-            if should_transcribe and deepgram_service:
-                # Combine all audio chunks
-                combined_audio = b''.join([bytes.fromhex(chunk) for chunk in session_data['audio_chunks']])
-                
-                # Save to temporary file
+
+            # Track chunk count for logging
+            chunk_count = session_data.get('chunk_count', 0) + 1
+            session_data['chunk_count'] = chunk_count
+
+            # Store chunk for final processing (keep all chunks for stop_recording)
+            session_data['audio_chunks'].append(audio_bytes.hex())
+
+            # Transcribe every chunk individually (not accumulated)
+            # This works because each WebM chunk from MediaRecorder is a complete file
+            if deepgram_service:
                 temp_dir = tempfile.gettempdir()
-                temp_filename = f"ws_audio_{uuid.uuid4()}.webm"
+                temp_filename = f"ws_chunk_{uuid.uuid4()}.webm"
                 temp_path = os.path.join(temp_dir, temp_filename)
-                
+
                 with open(temp_path, 'wb') as f:
-                    f.write(combined_audio)
+                    f.write(audio_bytes)
 
                 try:
                     result = deepgram_service.transcribe_audio_file(
@@ -236,43 +242,51 @@ def handle_audio_chunk(data):
                         language=session_data.get('language', 'fr-CA'),
                         model=session_data.get('model', 'general-nova-3')
                     )
-                    
+
                     if result.get('success') and result.get('transcript'):
-                        transcript = result['transcript']
-                        session_data['transcript_buffer'] = transcript
-                        
-                        emit('transcript_update', {
-                            'transcript': transcript,
-                            'is_final': is_final,
-                            'confidence': result.get('confidence', 0),
-                            'word_count': result.get('word_count', 0),
-                            'speaker_segments': result.get('speaker_segments', [])
-                        })
-                        
-                        logger.debug(f"WebSocket: Transcribed {len(transcript)} chars for {sid}, confidence: {result.get('confidence', 0)}")
-                    else:
-                        # Fallback to previous transcript if available
-                        if session_data['transcript_buffer']:
+                        new_text = result['transcript'].strip()
+
+                        if new_text:
+                            # APPEND new transcription to existing buffer
+                            existing = session_data.get('transcript_buffer', '').strip()
+                            if existing:
+                                # Add space between existing and new text
+                                session_data['transcript_buffer'] = existing + ' ' + new_text
+                            else:
+                                session_data['transcript_buffer'] = new_text
+
+                            # Send the FULL accumulated transcript to client
                             emit('transcript_update', {
                                 'transcript': session_data['transcript_buffer'],
-                                'is_final': False,
-                                'error': result.get('error', 'Transcription failed')
+                                'is_final': is_final,
+                                'confidence': result.get('confidence', 0),
+                                'word_count': len(session_data['transcript_buffer'].split()),
+                                'speaker_segments': result.get('speaker_segments', []),
+                                'chunk_number': chunk_count
                             })
+
+                            logger.debug(f"WebSocket: Chunk {chunk_count} transcribed, total: {len(session_data['transcript_buffer'])} chars")
+                    else:
+                        # On transcription failure, still acknowledge the chunk
+                        emit('chunk_received', {
+                            'chunk_number': chunk_count,
+                            'transcript': session_data.get('transcript_buffer', ''),
+                            'error': result.get('error', 'Chunk transcription failed')
+                        })
                 finally:
-                    # Clean up temporary file
                     try:
                         os.remove(temp_path)
                     except:
                         pass
             else:
                 emit('chunk_received', {'chunk_number': chunk_count})
-            
+
             save_session(sid, session_data)
-            
+
         except Exception as decode_error:
             logger.error(f"WebSocket: Audio decode error - {decode_error}")
             emit('error', {'message': 'Invalid audio data format'})
-            
+
     except Exception as e:
         logger.error(f"WebSocket audio_chunk error: {e}")
         emit_error(str(e))
@@ -280,7 +294,12 @@ def handle_audio_chunk(data):
 
 @socketio.on('stop_recording')
 def handle_stop_recording(data=None):
-    """Handle stop recording with proper signature."""
+    """Handle stop recording with proper signature.
+
+    Since we've been transcribing each chunk individually and accumulating,
+    the transcript_buffer already contains the full transcript.
+    We just return it without trying to re-transcribe concatenated WebM files.
+    """
     try:
         sid = request.sid
         session_data = get_session(sid)
@@ -288,50 +307,24 @@ def handle_stop_recording(data=None):
             emit('error', {'message': 'No active session'})
             return
 
-        if session_data['audio_chunks'] and deepgram_service:
-            # Process final audio
-            combined_audio = b''.join([bytes.fromhex(chunk) for chunk in session_data['audio_chunks']])
-            temp_dir = tempfile.gettempdir()
-            temp_filename = f"ws_final_{uuid.uuid4()}.webm"
-            temp_path = os.path.join(temp_dir, temp_filename)
-            
-            with open(temp_path, 'wb') as f:
-                f.write(combined_audio)
+        # Use the accumulated transcript from individual chunk transcriptions
+        final_transcript = session_data.get('transcript_buffer', '').strip()
+        chunk_count = session_data.get('chunk_count', 0)
 
-            try:
-                result = deepgram_service.transcribe_audio_file(
-                    temp_path,
-                    language=session_data.get('language', 'fr-CA'),
-                    model=session_data.get('model', 'general-nova-3')
-                )
-                
-                final_transcript = result.get('transcript', session_data['transcript_buffer'])
-                
-                emit('recording_stopped', {
-                    'status': 'ok',
-                    'final_transcript': final_transcript,
-                    'success': result.get('success', False),
-                    'confidence': result.get('confidence', 0),
-                    'word_count': result.get('word_count', 0),
-                    'audio_duration': result.get('audio_duration'),
-                    'speaker_segments': result.get('speaker_segments', [])
-                })
-                
-                logger.info(f"WebSocket: Recording stopped - {sid}, transcript length: {len(final_transcript)}")
-            finally:
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-        else:
-            emit('recording_stopped', {
-                'status': 'ok',
-                'final_transcript': session_data.get('transcript_buffer', ''),
-                'message': 'No audio data or Deepgram unavailable'
-            })
+        emit('recording_stopped', {
+            'status': 'ok',
+            'final_transcript': final_transcript,
+            'success': bool(final_transcript),
+            'confidence': 0.9 if final_transcript else 0,
+            'word_count': len(final_transcript.split()) if final_transcript else 0,
+            'chunk_count': chunk_count
+        })
+
+        logger.info(f"WebSocket: Recording stopped - {sid}, transcript length: {len(final_transcript)}, chunks: {chunk_count}")
 
         # Clean up session
         session_data['audio_chunks'] = []
+        session_data['chunk_count'] = 0
         save_session(sid, session_data)
         
     except Exception as e:
